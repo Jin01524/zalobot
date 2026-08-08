@@ -20,6 +20,8 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+import uuid
+import yt_dlp
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from io import BytesIO 
 
@@ -916,6 +918,24 @@ def xu_ly_lenh(user_name, message_text, mentioned_names, user_msg_counts, tarot_
 
             return messages_to_send
 
+    # ===========================================================================
+    # 🎬 TẢI VIDEO ĐA NỀN TẢNG (X, Facebook, YouTube, Instagram...)
+    # ===========================================================================
+    if cmd in ["/video", "/v"]:
+        parts = message_text.split(maxsplit=1)
+        if len(parts) < 2:
+            return "❌ Cú pháp: /video [link_video]\n📌 Hỗ trợ: Youtube, Facebook, X (Twitter), Instagram, TikTok..."
+
+        target_url = parts[1].strip().strip("<>").strip()
+        if not (target_url.startswith("http://") or target_url.startswith("https://")):
+            return "Liên kết không được hỗ trợ"
+
+        video_file = download_video_yt_dlp(target_url, BASE_DIR)
+        if not video_file or not os.path.exists(video_file):
+            return "Liên kết không được hỗ trợ"
+
+        return {"type": "video", "path": video_file, "caption": f"🎬 Video từ: {target_url}"}
+
     if msg in ["/menu", "/help"]:
         return """--- 🎰 HỆ SINH THÁI TẺN ---
 👉 /profile hoặc /p : Xem hồ sơ cá nhân
@@ -953,6 +973,7 @@ def xu_ly_lenh(user_name, message_text, mentioned_names, user_msg_counts, tarot_
 
 🌾 /lamruong | 🐟 /danhca | 🏍️ /xeom | 🗑️ /vechai
 --- 🔮 TÍNH NĂNG KHÁC ---
+👉 /video [link] : Tải video (X, Facebook, Youtube, Insta...)
 👉 /tarot : Bốc bài Tarot (50 xu/lần)
 👉 /pick [A] [B] : Chọn ngẫu nhiên
 👉 /roll : Đổ xúc xắc
@@ -2870,6 +2891,116 @@ def gui_anh_zalo(driver, image_data, caption=""):
         print(f"❌ Lỗi gửi ảnh: {e}")
         return False
 
+
+def download_video_yt_dlp(url, output_dir):
+    """Tải video đa nền tảng (X, Facebook, YouTube, Instagram...) bằng yt-dlp và ghép ffmpeg."""
+    unique_id = str(uuid.uuid4())[:8]
+    output_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
+
+    ydl_opts = {
+        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[ext=mp4]/best',
+        'outtmpl': output_template,
+        'merge_output_format': 'mp4',
+        'quiet': True,
+        'no_warnings': True,
+        'max_filesize': 100 * 1024 * 1024,  # Giới hạn 100MB cho Zalo Web
+        'ignoreerrors': False,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                return None
+
+            expected_filename = ydl.prepare_filename(info)
+            if not expected_filename.endswith('.mp4'):
+                base, _ = os.path.splitext(expected_filename)
+                expected_filename = base + '.mp4'
+
+            if os.path.exists(expected_filename):
+                return expected_filename
+
+            for f in os.listdir(output_dir):
+                if f.startswith(f"temp_video_{unique_id}"):
+                    return os.path.join(output_dir, f)
+            return None
+    except Exception as e:
+        print(f"⚠️ [yt-dlp] Lỗi tải video từ {url}: {e}")
+        return None
+
+
+def gui_video_zalo(driver, video_path, caption=""):
+    """Gửi video vào nhóm chat Zalo qua Selenium."""
+    try:
+        if not os.path.exists(video_path):
+            print(f"❌ File video không tồn tại: {video_path}")
+            return False
+
+        with open(video_path, "rb") as f:
+            b64_str = base64.b64encode(f.read()).decode('utf-8')
+
+        input_box = driver.find_element(By.ID, "richInput")
+        input_box.click()
+        input_box.send_keys(Keys.CONTROL, "a")
+        input_box.send_keys(Keys.DELETE)
+        time.sleep(0.5)
+
+        # Mô phỏng paste ClipboardEvent dạng video/mp4
+        js_paste_video = """
+        const b64Str = arguments[0];
+        const byteCharacters = atob(b64Str);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], {type: 'video/mp4'});
+        const file = new File([blob], 'video.mp4', {type: 'video/mp4'});
+        
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        
+        const el = document.getElementById('richInput');
+        const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true });
+        el.dispatchEvent(evt);
+        """
+        driver.execute_script(js_paste_video, b64_str)
+        time.sleep(2.0)
+
+        # Fallback qua file input nếu có
+        file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+        if file_inputs:
+            for fi in reversed(file_inputs):
+                try:
+                    fi.send_keys(os.path.abspath(video_path))
+                    time.sleep(2.0)
+                    break
+                except Exception:
+                    pass
+
+        if caption:
+            js_paste_text = """
+            const dt = new DataTransfer();
+            dt.setData('text/plain', arguments[0]);
+            const el = document.getElementById('richInput');
+            const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true });
+            el.dispatchEvent(evt);
+            """
+            driver.execute_script(js_paste_text, caption)
+            time.sleep(1)
+
+        try:
+            driver.find_element(By.CSS_SELECTOR, ".send-msg-btn").click()
+        except Exception:
+            input_box.send_keys(Keys.ENTER)
+        time.sleep(1.5)
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi gửi video Zalo: {e}")
+        return False
+
+
 # ==============================================================================
 # 🖼️ DECORATOR: Tự động offload mọi hàm tao_anh_* sang _pil_render_pool
 # Main thread submit task → PIL render trên thread riêng → .result() lấy về
@@ -4295,10 +4426,27 @@ def main():
                         if reply_data: 
                             if isinstance(reply_data, dict) and reply_data.get("type") == "image":
                                 gui_anh_zalo(driver, reply_data["path"], reply_data.get("caption", ""))
+                            elif isinstance(reply_data, dict) and reply_data.get("type") == "video":
+                                vpath = reply_data["path"]
+                                gui_video_zalo(driver, vpath, reply_data.get("caption", ""))
+                                try:
+                                    if os.path.exists(vpath):
+                                        os.remove(vpath)
+                                        print(f"🧹 Đã xóa video tạm: {vpath}")
+                                except Exception as ve:
+                                    print(f"⚠️ Lỗi xóa video tạm: {ve}")
                             elif isinstance(reply_data, list):
                                 for t in reply_data:
                                     if isinstance(t, dict) and t.get("type") == "image":
                                         gui_anh_zalo(driver, t["path"], t.get("caption", ""))
+                                    elif isinstance(t, dict) and t.get("type") == "video":
+                                        vpath = t["path"]
+                                        gui_video_zalo(driver, vpath, t.get("caption", ""))
+                                        try:
+                                            if os.path.exists(vpath):
+                                                os.remove(vpath)
+                                        except Exception:
+                                            pass
                                     else:
                                         gui_tin_nhan_zalo(driver, t)
                                     time.sleep(0.8)
