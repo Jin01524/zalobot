@@ -2903,9 +2903,25 @@ def download_video_yt_dlp(url, output_dir):
         'merge_output_format': 'mp4',
         'quiet': True,
         'no_warnings': True,
+        'nocheckcertificate': True,
         'max_filesize': 100 * 1024 * 1024,  # Giới hạn 100MB cho Zalo Web
         'ignoreerrors': False,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+        }
     }
+
+    # Nếu có file cookies.txt trong thư mục dự án, tự động sử dụng để tải video riêng tư/yêu cầu login
+    cookie_path = os.path.join(output_dir, "cookies.txt")
+    if os.path.exists(cookie_path):
+        ydl_opts['cookiefile'] = cookie_path
+    else:
+        # Nếu máy có Chrome, thử tự động đọc cookie từ Chrome
+        try:
+            ydl_opts['cookiesfrombrowser'] = ('chrome',)
+        except Exception:
+            pass
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
