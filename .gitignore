@@ -1,0 +1,39 @@
+# Chrome profile session data
+chrome_profile_zalo/
+chrome_profile_fb/
+fb_temp_screenshots/
+scratch_fb_test/
+
+# SQLite Databases
+*.db
+*.db-shm
+*.db-wal
+
+# Temporary / Generated files
+*.png
+*.jpg
+__pycache__/
+.vscode/
+.idea/
+zalo_qr.png
+
+# User Data JSONs
+thong_ke_chat.json
+tarot_data.json
+coin_data.json
+loan_data.json
+credit_data.json
+jobs_data.json
+streaks_data.json
+business_config.json
+assets_data.json
+p2p_data.json
+gold_data.json
+altp_winners.json
+profile_data.json
+avatar_data.json
+inventory_data.json
+market_data.json
+daily_business_stats.json
+wallet_data.json
+personal_data.json
