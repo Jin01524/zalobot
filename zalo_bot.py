@@ -2892,18 +2892,25 @@ def gui_anh_zalo(driver, image_data, caption=""):
         return False
 
 
+class QuietLogger:
+    def debug(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+
+
 def download_video_yt_dlp(url, output_dir):
     """Tải video đa nền tảng (X, Facebook, YouTube, Instagram...) bằng yt-dlp và ghép ffmpeg."""
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
 
     ydl_opts = {
-        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[ext=mp4]/best',
-        'outtmpl': output_template,
-        'merge_output_format': 'mp4',
+        'logger': QuietLogger(),
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
+        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[ext=mp4]/best',
+        'outtmpl': output_template,
+        'merge_output_format': 'mp4',
         'max_filesize': 100 * 1024 * 1024,  # Giới hạn 100MB cho Zalo Web
         'ignoreerrors': False,
         'http_headers': {
@@ -2912,12 +2919,20 @@ def download_video_yt_dlp(url, output_dir):
         }
     }
 
-    # Nếu có file cookies.txt trong thư mục dự án, tự động sử dụng để tải video riêng tư/yêu cầu login
+    # Nếu có file cookies.txt trong thư mục dự án
     cookie_path = os.path.join(output_dir, "cookies.txt")
     if os.path.exists(cookie_path):
+        try:
+            with open(cookie_path, "r", encoding="utf-8") as cf:
+                lines = cf.readlines()
+            clean_lines = [l for l in lines if not l.startswith("cat <<") and not l.strip() == "EOF"]
+            if len(clean_lines) != len(lines):
+                with open(cookie_path, "w", encoding="utf-8") as cf:
+                    cf.writelines(clean_lines)
+        except Exception:
+            pass
         ydl_opts['cookiefile'] = cookie_path
     else:
-        # Nếu máy có Chrome, thử tự động đọc cookie từ Chrome
         try:
             ydl_opts['cookiesfrombrowser'] = ('chrome',)
         except Exception:
@@ -2941,8 +2956,8 @@ def download_video_yt_dlp(url, output_dir):
                 if f.startswith(f"temp_video_{unique_id}"):
                     return os.path.join(output_dir, f)
             return None
-    except Exception as e:
-        print(f"⚠️ [yt-dlp] Lỗi tải video từ {url}: {e}")
+    except Exception:
+        # Trả về None im lặng để bot phản hồi "Liên kết không được hỗ trợ" theo đúng yêu cầu
         return None
 
 
