@@ -2999,8 +2999,20 @@ def download_video_web(target_url, output_dir):
                 for chunk in res.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
-            if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
-                return filepath
+
+            # Kiểm tra tính hợp lệ của file mp4 (dung lượng > 50KB và không phải HTML lỗi)
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 50000:
+                with open(filepath, "rb") as check_f:
+                    header = check_f.read(500)
+                if b"<!DOCTYPE" not in header and b"<html" not in header and b"<!doctype" not in header:
+                    return filepath
+
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+
         return None
     except Exception as e:
         print(f"⚠️ [Web Downloader] Lỗi tải video qua web: {e}")
@@ -3013,71 +3025,94 @@ def download_video_web(target_url, output_dir):
 
 
 def gui_video_zalo(driver, video_path, caption=""):
-    """Gửi video vào nhóm chat Zalo qua Selenium."""
+    """Gửi video phát trực tiếp được trong nhóm chat Zalo qua Selenium."""
     try:
-        if not os.path.exists(video_path):
-            print(f"❌ File video không tồn tại: {video_path}")
+        abs_path = os.path.abspath(video_path)
+        if not os.path.exists(abs_path) or os.path.getsize(abs_path) < 1000:
+            print(f"❌ File video không hợp lệ: {abs_path}")
             return False
 
-        with open(video_path, "rb") as f:
-            b64_str = base64.b64encode(f.read()).decode('utf-8')
-
-        input_box = driver.find_element(By.ID, "richInput")
-        input_box.click()
-        input_box.send_keys(Keys.CONTROL, "a")
-        input_box.send_keys(Keys.DELETE)
-        time.sleep(0.5)
-
-        # Mô phỏng paste ClipboardEvent dạng video/mp4
-        js_paste_video = """
-        const b64Str = arguments[0];
-        const byteCharacters = atob(b64Str);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], {type: 'video/mp4'});
-        const file = new File([blob], 'video.mp4', {type: 'video/mp4'});
-        
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        
-        const el = document.getElementById('richInput');
-        const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true });
-        el.dispatchEvent(evt);
-        """
-        driver.execute_script(js_paste_video, b64_str)
-        time.sleep(2.0)
-
-        # Fallback qua file input nếu có
+        # 🧠 BƯỚC 1: Đưa đường dẫn file video vào input[type='file'] của Zalo
+        # Điều này kích hoạt Zalo Web xử lý Video chuẩn (phát được trực tiếp)
+        uploaded = False
         file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
         if file_inputs:
             for fi in reversed(file_inputs):
                 try:
-                    fi.send_keys(os.path.abspath(video_path))
-                    time.sleep(2.0)
+                    fi.send_keys(abs_path)
+                    uploaded = True
+                    time.sleep(2.5)
                     break
                 except Exception:
                     pass
 
-        if caption:
-            js_paste_text = """
+        # Fallback dán clipboard nếu không tìm thấy file input
+        if not uploaded:
+            with open(abs_path, "rb") as f:
+                b64_str = base64.b64encode(f.read()).decode('utf-8')
+
+            input_box = driver.find_element(By.ID, "richInput")
+            input_box.click()
+            input_box.send_keys(Keys.CONTROL, "a")
+            input_box.send_keys(Keys.DELETE)
+            time.sleep(0.5)
+
+            js_paste_video = """
+            const b64Str = arguments[0];
+            const byteCharacters = atob(b64Str);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], {type: 'video/mp4'});
+            const file = new File([blob], 'video.mp4', {type: 'video/mp4'});
+            
             const dt = new DataTransfer();
-            dt.setData('text/plain', arguments[0]);
+            dt.items.add(file);
+            
             const el = document.getElementById('richInput');
             const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true });
             el.dispatchEvent(evt);
             """
-            driver.execute_script(js_paste_text, caption)
-            time.sleep(1)
+            driver.execute_script(js_paste_video, b64_str)
+            time.sleep(2.0)
 
+        # 🧠 BƯỚC 2: Nhập caption nếu có
+        if caption:
+            try:
+                js_paste_text = """
+                const dt = new DataTransfer();
+                dt.setData('text/plain', arguments[0]);
+                const el = document.getElementById('richInput');
+                const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true });
+                el.dispatchEvent(evt);
+                """
+                driver.execute_script(js_paste_text, caption)
+                time.sleep(1)
+            except Exception:
+                pass
+
+        # 🧠 BƯỚC 3: Bấm nút gửi
         try:
-            driver.find_element(By.CSS_SELECTOR, ".send-msg-btn").click()
+            send_btns = driver.find_elements(By.CSS_SELECTOR, ".send-msg-btn, button.btn-primary, [data-translate-inner='STR_SEND']")
+            if send_btns:
+                send_btns[0].click()
+            else:
+                input_box = driver.find_element(By.ID, "richInput")
+                input_box.send_keys(Keys.ENTER)
         except Exception:
-            input_box.send_keys(Keys.ENTER)
-        time.sleep(1.5)
+            try:
+                input_box = driver.find_element(By.ID, "richInput")
+                input_box.send_keys(Keys.ENTER)
+            except Exception:
+                pass
+
+        time.sleep(2.0)
         return True
+    except Exception as e:
+        print(f"❌ Lỗi gửi video Zalo: {e}")
+        return False
     except Exception as e:
         print(f"❌ Lỗi gửi video Zalo: {e}")
         return False
