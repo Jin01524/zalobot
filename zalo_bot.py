@@ -21,7 +21,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import uuid
-import yt_dlp
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from io import BytesIO 
 
@@ -930,7 +929,7 @@ def xu_ly_lenh(user_name, message_text, mentioned_names, user_msg_counts, tarot_
         if not (target_url.startswith("http://") or target_url.startswith("https://")):
             return "Liên kết không được hỗ trợ"
 
-        video_file = download_video_yt_dlp(target_url, BASE_DIR)
+        video_file = download_video_web(target_url, BASE_DIR)
         if not video_file or not os.path.exists(video_file):
             return "Liên kết không được hỗ trợ"
 
@@ -2892,86 +2891,125 @@ def gui_anh_zalo(driver, image_data, caption=""):
         return False
 
 
-class QuietLogger:
-    def debug(self, msg): pass
-    def warning(self, msg): pass
-    def error(self, msg): pass
+def download_video_web(target_url, output_dir):
+    """
+    Tải video dựa vào liên kết người dùng gửi bằng cách truy cập các trang web hỗ trợ tương ứng:
+    - FB: https://fsave.net/vi
+    - X (Twitter): https://www.xsaver.io/x-downloader/vi/
+    - Instagram: https://savevid.to/vi
+    - YouTube: https://ytsave.to/vi2/
+    """
+    url_lower = target_url.lower()
+    site_url = None
+    if "facebook.com" in url_lower or "fb.watch" in url_lower:
+        site_url = "https://fsave.net/vi"
+    elif "x.com" in url_lower or "twitter.com" in url_lower:
+        site_url = "https://www.xsaver.io/x-downloader/vi/"
+    elif "instagram.com" in url_lower:
+        site_url = "https://savevid.to/vi"
+    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+        site_url = "https://ytsave.to/vi2/"
 
+    if not site_url:
+        return None
 
-def download_video_yt_dlp(url, output_dir):
-    """Tải video đa nền tảng (X, Facebook, YouTube, Instagram...) bằng yt-dlp."""
-    unique_id = str(uuid.uuid4())[:8]
-    output_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--mute-audio")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
 
-    cookie_path = os.path.join(output_dir, "cookies.txt")
-    if os.path.exists(cookie_path):
+    helper_driver = None
+    try:
         try:
-            with open(cookie_path, "r", encoding="utf-8") as cf:
-                lines = cf.readlines()
-            clean_lines = [l for l in lines if not l.startswith("cat <<") and not l.strip() == "EOF"]
-            if len(clean_lines) != len(lines):
-                with open(cookie_path, "w", encoding="utf-8") as cf:
-                    cf.writelines(clean_lines)
+            service = Service(ChromeDriverManager().install())
+            helper_driver = webdriver.Chrome(service=service, options=options)
         except Exception:
-            pass
+            helper_driver = webdriver.Chrome(options=options)
 
-    # Danh sách URL cần thử (hỗ trợ chuyển đổi Facebook reel sang watch)
-    urls_to_try = [url]
-    if "facebook.com/reel/" in url or "fb.watch/" in url:
-        try:
-            reel_id = url.split("/reel/")[1].split("/")[0].split("?")[0]
-            urls_to_try.append(f"https://www.facebook.com/watch/?v={reel_id}")
-        except Exception:
-            pass
+        helper_driver.set_window_size(1280, 850)
+        helper_driver.get(site_url)
+        time.sleep(2)
 
-    formats_to_try = [
-        'b/best',
-        'bv*[height<=1080]+ba/b[height<=1080]/best',
-        'best'
-    ]
+        # 1. Tìm ô nhập link
+        inputs = helper_driver.find_elements(By.CSS_SELECTOR, "input[name='url'], input[type='text'], input[type='url'], #k_url, #url")
+        if not inputs:
+            helper_driver.quit()
+            return None
 
-    for target_url in urls_to_try:
-        for fmt in formats_to_try:
-            ydl_opts = {
-                'logger': QuietLogger(),
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'format': fmt,
-                'outtmpl': output_template,
-                'merge_output_format': 'mp4',
-                'max_filesize': 100 * 1024 * 1024,  # 100MB max
-                'ignoreerrors': False,
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
-                }
-            }
+        input_field = inputs[0]
+        input_field.clear()
+        input_field.send_keys(target_url)
+        time.sleep(0.5)
 
-            if os.path.exists(cookie_path):
-                ydl_opts['cookiefile'] = cookie_path
+        # 2. Bấm nút Submit / Tải xuống
+        submit_btns = helper_driver.find_elements(By.CSS_SELECTOR, "button[type='submit'], input[type='submit'], #k_btn, .btn-search, button.btn")
+        if submit_btns:
+            submit_btns[0].click()
+        else:
+            input_field.send_keys(Keys.ENTER)
 
+        # 3. Chờ kết quả tải xuất hiện
+        time.sleep(5)
+
+        # Tìm các link/nút tải file
+        direct_url = None
+        elements = helper_driver.find_elements(By.CSS_SELECTOR, "a[href], button[onclick]")
+        for elem in elements:
+            href = elem.get_attribute("href") or ""
+            text = elem.text.strip().lower()
+            if any(ext in href.lower() for ext in [".mp4", "download.php", "googlevideo.com", "fbcdn.net", "twimg.com", "cdninstagram.com"]):
+                direct_url = href
+                break
+            elif ("tải" in text or "download" in text or "mp4" in text or "hd" in text) and href.startswith("http") and site_url not in href:
+                direct_url = href
+                break
+
+        if not direct_url:
+            render_btns = helper_driver.find_elements(By.XPATH, "//a[contains(text(), 'Tải') or contains(text(), 'Download') or contains(text(), 'Render')]")
+            if render_btns:
+                try:
+                    helper_driver.execute_script("arguments[0].click();", render_btns[0])
+                    time.sleep(3)
+                    new_links = helper_driver.find_elements(By.CSS_SELECTOR, "a[href^='http']")
+                    for nl in new_links:
+                        nhref = nl.get_attribute("href")
+                        if nhref and site_url not in nhref and any(k in nhref for k in [".mp4", "download", "video"]):
+                            direct_url = nhref
+                            break
+                except Exception:
+                    pass
+
+        helper_driver.quit()
+
+        if not direct_url:
+            return None
+
+        # 4. Tải file video về ổ cứng
+        res = requests.get(direct_url, stream=True, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        }, timeout=40)
+
+        if res.status_code == 200:
+            unique_id = str(uuid.uuid4())[:8]
+            filepath = os.path.join(output_dir, f"temp_video_{unique_id}.mp4")
+            with open(filepath, "wb") as f:
+                for chunk in res.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
+                return filepath
+        return None
+    except Exception as e:
+        print(f"⚠️ [Web Downloader] Lỗi tải video qua web: {e}")
+        if helper_driver:
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(target_url, download=True)
-                    if not info:
-                        continue
-
-                    expected_filename = ydl.prepare_filename(info)
-                    if not expected_filename.endswith('.mp4'):
-                        base, _ = os.path.splitext(expected_filename)
-                        expected_filename = base + '.mp4'
-
-                    if os.path.exists(expected_filename):
-                        return expected_filename
-
-                    for f in os.listdir(output_dir):
-                        if f.startswith(f"temp_video_{unique_id}"):
-                            return os.path.join(output_dir, f)
+                helper_driver.quit()
             except Exception:
-                continue
-
-    return None
+                pass
+        return None
 
 
 def gui_video_zalo(driver, video_path, caption=""):
