@@ -2915,52 +2915,61 @@ def download_video_yt_dlp(url, output_dir):
         except Exception:
             pass
 
+    # Danh sách URL cần thử (hỗ trợ chuyển đổi Facebook reel sang watch)
+    urls_to_try = [url]
+    if "facebook.com/reel/" in url or "fb.watch/" in url:
+        try:
+            reel_id = url.split("/reel/")[1].split("/")[0].split("?")[0]
+            urls_to_try.append(f"https://www.facebook.com/watch/?v={reel_id}")
+        except Exception:
+            pass
+
     formats_to_try = [
         'b/best',
         'bv*[height<=1080]+ba/b[height<=1080]/best',
         'best'
     ]
 
-    for fmt in formats_to_try:
-        ydl_opts = {
-            'logger': QuietLogger(),
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'format': fmt,
-            'outtmpl': output_template,
-            'merge_output_format': 'mp4',
-            'max_filesize': 100 * 1024 * 1024,  # 100MB max
-            'ignoreerrors': False,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+    for target_url in urls_to_try:
+        for fmt in formats_to_try:
+            ydl_opts = {
+                'logger': QuietLogger(),
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'format': fmt,
+                'outtmpl': output_template,
+                'merge_output_format': 'mp4',
+                'max_filesize': 100 * 1024 * 1024,  # 100MB max
+                'ignoreerrors': False,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+                }
             }
-        }
 
-        if os.path.exists(cookie_path):
-            ydl_opts['cookiefile'] = cookie_path
+            if os.path.exists(cookie_path):
+                ydl_opts['cookiefile'] = cookie_path
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if not info:
-                    continue
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(target_url, download=True)
+                    if not info:
+                        continue
 
-                expected_filename = ydl.prepare_filename(info)
-                if not expected_filename.endswith('.mp4'):
-                    base, _ = os.path.splitext(expected_filename)
-                    expected_filename = base + '.mp4'
+                    expected_filename = ydl.prepare_filename(info)
+                    if not expected_filename.endswith('.mp4'):
+                        base, _ = os.path.splitext(expected_filename)
+                        expected_filename = base + '.mp4'
 
-                if os.path.exists(expected_filename):
-                    return expected_filename
+                    if os.path.exists(expected_filename):
+                        return expected_filename
 
-                for f in os.listdir(output_dir):
-                    if f.startswith(f"temp_video_{unique_id}"):
-                        return os.path.join(output_dir, f)
-        except Exception as e:
-            print(f"⚠️ [yt-dlp format={fmt}] Retry info: {e}")
-            continue
+                    for f in os.listdir(output_dir):
+                        if f.startswith(f"temp_video_{unique_id}"):
+                            return os.path.join(output_dir, f)
+            except Exception:
+                continue
 
     return None
 
