@@ -2899,27 +2899,10 @@ class QuietLogger:
 
 
 def download_video_yt_dlp(url, output_dir):
-    """Tải video đa nền tảng (X, Facebook, YouTube, Instagram...) bằng yt-dlp và ghép ffmpeg."""
+    """Tải video đa nền tảng (X, Facebook, YouTube, Instagram...) bằng yt-dlp."""
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
 
-    ydl_opts = {
-        'logger': QuietLogger(),
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[ext=mp4]/best',
-        'outtmpl': output_template,
-        'merge_output_format': 'mp4',
-        'max_filesize': 100 * 1024 * 1024,  # Giới hạn 100MB cho Zalo Web
-        'ignoreerrors': False,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
-        }
-    }
-
-    # Nếu có file cookies.txt trong thư mục dự án
     cookie_path = os.path.join(output_dir, "cookies.txt")
     if os.path.exists(cookie_path):
         try:
@@ -2931,34 +2914,55 @@ def download_video_yt_dlp(url, output_dir):
                     cf.writelines(clean_lines)
         except Exception:
             pass
-        ydl_opts['cookiefile'] = cookie_path
-    else:
+
+    formats_to_try = [
+        'b/best',
+        'bv*[height<=1080]+ba/b[height<=1080]/best',
+        'best'
+    ]
+
+    for fmt in formats_to_try:
+        ydl_opts = {
+            'logger': QuietLogger(),
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'format': fmt,
+            'outtmpl': output_template,
+            'merge_output_format': 'mp4',
+            'max_filesize': 100 * 1024 * 1024,  # 100MB max
+            'ignoreerrors': False,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+            }
+        }
+
+        if os.path.exists(cookie_path):
+            ydl_opts['cookiefile'] = cookie_path
+
         try:
-            ydl_opts['cookiesfrombrowser'] = ('chrome',)
-        except Exception:
-            pass
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if not info:
+                    continue
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if not info:
-                return None
+                expected_filename = ydl.prepare_filename(info)
+                if not expected_filename.endswith('.mp4'):
+                    base, _ = os.path.splitext(expected_filename)
+                    expected_filename = base + '.mp4'
 
-            expected_filename = ydl.prepare_filename(info)
-            if not expected_filename.endswith('.mp4'):
-                base, _ = os.path.splitext(expected_filename)
-                expected_filename = base + '.mp4'
+                if os.path.exists(expected_filename):
+                    return expected_filename
 
-            if os.path.exists(expected_filename):
-                return expected_filename
+                for f in os.listdir(output_dir):
+                    if f.startswith(f"temp_video_{unique_id}"):
+                        return os.path.join(output_dir, f)
+        except Exception as e:
+            print(f"⚠️ [yt-dlp format={fmt}] Retry info: {e}")
+            continue
 
-            for f in os.listdir(output_dir):
-                if f.startswith(f"temp_video_{unique_id}"):
-                    return os.path.join(output_dir, f)
-            return None
-    except Exception:
-        # Trả về None im lặng để bot phản hồi "Liên kết không được hỗ trợ" theo đúng yêu cầu
-        return None
+    return None
 
 
 def gui_video_zalo(driver, video_path, caption=""):
