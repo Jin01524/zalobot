@@ -21,27 +21,67 @@ def init_ldplayer():
 def start_zalo_and_open_chat(d, group_name):
     print("🚀 Đang khởi động ứng dụng Zalo...")
     d.app_start(ZALO_PACKAGE)
-    time.sleep(3)
+    time.sleep(4)  # Chờ 4s cho Zalo Android mở hẳn
 
-    # Click vào ô Tìm kiếm Zalo
+    # 1. Thử click trực tiếp vào nhóm nếu đã hiển thị ngay màn hình tin nhắn
+    if d(text=group_name).exists:
+        d(text=group_name).click()
+        print(f"✅ Đã chọn phòng chat: '{group_name}'")
+        time.sleep(2)
+        return True
+
+    # 2. Tìm ô Tìm kiếm trên giao diện Zalo Android
     print(f"🔍 Đang tìm kiếm nhóm chat: '{group_name}'...")
-    search_icon = d(description="Tìm kiếm") or d(resourceId="com.zing.zalo:id/btn_search")
-    if search_icon.exists:
-        search_icon.click()
-        time.sleep(1)
-        
-        # Nhập tên nhóm vào khung tìm kiếm
-        search_input = d(resourceId="com.zing.zalo:id/search_src_text") or d(className="android.widget.EditText")
-        search_input.send_keys(group_name)
-        time.sleep(1.5)
-        
-        # Nhấp vào kết quả đầu tiên
-        first_result = d(text=group_name)
-        if first_result.exists:
-            first_result.click()
-            print(f"✅ Đã vào phòng chat: '{group_name}'")
-            time.sleep(2)
-            return True
+    search_bar = None
+    search_selectors = [
+        d(resourceId="com.zing.zalo:id/mSearchLayout"),
+        d(resourceId="com.zing.zalo:id/btn_search"),
+        d(resourceId="com.zing.zalo:id/input_search"),
+        d(resourceId="com.zing.zalo:id/search_icon"),
+        d(resourceId="com.zing.zalo:id/main_tab_search"),
+        d(text="Tìm kiếm"),
+        d(textContains="Tìm kiếm"),
+        d(description="Tìm kiếm"),
+        d(className="android.widget.EditText")
+    ]
+    for s in search_selectors:
+        if s.exists:
+            search_bar = s
+            break
+
+    if search_bar:
+        try:
+            search_bar.click()
+            time.sleep(1.5)
+            
+            # Nhập tên nhóm vào ô EditText
+            search_input = (
+                d(resourceId="com.zing.zalo:id/search_src_text") or 
+                d(resourceId="com.zing.zalo:id/input_search") or
+                d(className="android.widget.EditText")
+            )
+            if search_input.exists:
+                search_input.set_text(group_name)
+                time.sleep(2)
+                
+                # Tìm và click tên nhóm trong danh sách kết quả
+                target_result = d(text=group_name) or d(textContains=group_name)
+                if target_result.exists:
+                    target_result.click()
+                    print(f"✅ Đã vào phòng chat: '{group_name}'")
+                    time.sleep(2)
+                    return True
+        except Exception as e:
+            print(f"⚠️ Lỗi trong quá trình tìm kiếm: {e}")
+
+    # Debug: In ra tất cả text hiện tại trên màn hình Zalo để soi Selector
+    print("ℹ️ Danh sách chữ hiện trên màn hình LDPlayer hiện tại:")
+    try:
+        visible_texts = [el.get_text() for el in d(className="android.widget.TextView") if el.get_text()]
+        print("   " + ", ".join(visible_texts[:15]))
+    except Exception:
+        pass
+
     print(f"❌ Không tìm thấy phòng chat: '{group_name}'")
     return False
 
