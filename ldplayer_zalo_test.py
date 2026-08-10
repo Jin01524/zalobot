@@ -492,20 +492,26 @@ def create_story_poll_zalo(d, initiator_name=""):
             "Tuân"
         ]
 
-        # 3. Điền các phương án
-        for i, opt_name in enumerate(poll_names):
-            while len(d(resourceId="com.zing.zalo:id/et_group_poll_option")) <= i:
-                add_btn = d(resourceId="com.zing.zalo:id/btn_add_option") or d(text="Thêm phương án")
-                if add_btn.exists:
-                    add_btn.click()
-                    time.sleep(0.5)
-                else:
-                    break
-                    
-            opts_current = d(resourceId="com.zing.zalo:id/et_group_poll_option")
-            if i < len(opts_current):
-                opts_current[i].set_text(opt_name)
+        # 3. Điền 8 phương án (2 phương án đầu đã có sẵn trong Zalo)
+        opts = d(resourceId="com.zing.zalo:id/et_group_poll_option")
+        if len(opts) >= 1:
+            opts[0].set_text(poll_names[0])
+            time.sleep(0.2)
+        if len(opts) >= 2:
+            opts[1].set_text(poll_names[1])
+            time.sleep(0.2)
+
+        # Bấm thêm 6 phương án còn lại (Từ index 2 tới 7)
+        for i in range(2, len(poll_names)):
+            add_btn = d(resourceId="com.zing.zalo:id/btn_add_option") or d(text="Thêm phương án")
+            if add_btn.exists:
+                add_btn.click()
                 time.sleep(0.3)
+            
+            opts_current = d(resourceId="com.zing.zalo:id/et_group_poll_option")
+            if opts_current:
+                opts_current[-1].set_text(poll_names[i])
+                time.sleep(0.2)
 
         # 4. Tắt tùy chọn "Chọn nhiều phương án" & "Có thể thêm phương án"
         multi_switch = d(resourceId="com.zing.zalo:id/setting_multi_choice_switch")
