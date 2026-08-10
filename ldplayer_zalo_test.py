@@ -317,11 +317,11 @@ def send_zalo_video_android(d, video_path):
         return False
 
 def is_timestamp_or_status(s):
-    """Kiểm tra xem chuỗi có phải là mốc thời gian (vd: 22:33, 07:15) hoặc trạng thái giao diện không."""
+    """Kiểm tra xem chuỗi có phải là mốc thời gian (vd: 22:33, 07:15), tên nhóm header hoặc trạng thái giao diện không."""
     s_clean = s.strip()
     if re.match(r'^\d{1,2}:\d{2}$', s_clean):
         return True
-    if s_clean in ["Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi"]:
+    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi"]:
         return True
     return False
 
