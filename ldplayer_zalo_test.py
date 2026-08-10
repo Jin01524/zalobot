@@ -785,23 +785,25 @@ def check_and_send_fb_story(d, friend_keyword=None):
                         d.click(450, 240)
                         time.sleep(3)
 
-            # 3. Trên trang cá nhân: Nhấp vào Ảnh đại diện góc trái (X=160, Y=290) / nút "Xem tin"
-            print(f"👉 Đang nhấp vào Ảnh đại diện của {target_name} tại góc trái (X=160, Y=290)...")
+            # 3. Trên trang cá nhân: Nhấp vào Ảnh đại diện góc trái (X=130, Y=364)
+            print(f"👉 Đang nhấp vào Ảnh đại diện của {target_name} tại góc trái (X=130, Y=364)...")
             story_menu_btn = d(text="Xem tin") or d(textContains="Xem tin") or d(textContains="Tin")
             if story_menu_btn.exists:
                 story_menu_btn.click()
                 opened_story = True
-                time.sleep(3.5)
+                time.sleep(3)
             else:
                 # Click chính xác vị trí ảnh đại diện bên trái trên trang cá nhân
-                d.click(160, 290)
+                d.click(130, 364)
                 time.sleep(2)
                 # Nếu hiển thị popup tùy chọn: "Xem tin" / "Xem ảnh đại diện"
                 view_story_popup = d(text="Xem tin") or d(textContains="Xem tin") or d(textContains="Tin")
                 if view_story_popup.exists:
                     view_story_popup.click()
+                    time.sleep(3)
+                else:
+                    time.sleep(2.5) # Đã vào thẳng giao diện xem Story!
                 opened_story = True
-                time.sleep(3.5)
 
         # Xử lý popup OK của Facebook Lite nếu xuất hiện khi vào Story
         if d(text="OK").exists:
