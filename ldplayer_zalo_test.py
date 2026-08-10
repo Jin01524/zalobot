@@ -75,11 +75,12 @@ def download_video_web(target_url, output_dir):
         unique_id = str(uuid.uuid4())[:8]
         out_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
         ydl_opts = {
-            'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+            # Ưu tiên mp4 dưới 25MB để Zalo nhận được, fallback best nếu không có
+            'format': 'best[ext=mp4][filesize<25M]/best[ext=mp4][filesize<50M]/best[ext=mp4]/best',
             'outtmpl': out_template,
             'quiet': True,
             'no_warnings': True,
-            'max_filesize': 100 * 1024 * 1024, # 100MB
+            'max_filesize': 50 * 1024 * 1024, # 50MB
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -242,18 +243,27 @@ def send_zalo_message(d, text_msg):
         print(f"⚠️ Lỗi gửi tin nhắn: {e}")
     return False
 
+ZALO_MAX_VIDEO_MB = 25  # Giới hạn kích thước video Zalo có thể gửi được (MB)
+
 def send_zalo_video_android(d, video_path):
     """
-    Gửi Video MXH trực tiếp vào nhóm chat Zalo Android qua LDPlayer (Cấu hình từ XML Dump):
-    1. Push file .mp4 từ máy tính vào thẻ nhớ Android (/sdcard/DCIM/Camera/temp_bot_video.mp4).
-    2. Gọi MediaScanner để Zalo Android cập nhật video mới vào Thư viện.
-    3. Mở Bộ chọn Thư viện Zalo, chọn video mới nhất (Bounds [301,1160][599,1458]) và bấm Gửi HD.
+    Gửi Video MXH trực tiếp vào nhóm chat Zalo Android qua LDPlayer:
+    1. Kiểm tra kích thước file (>25MB sẽ cảnh báo nhưng vẫn thử gửi).
+    2. Push file .mp4 vào Android, gọi MediaScanner quét 2 lần để đảm bảo Zalo thấy file mới.
+    3. Mở Thư viện, chọn video mới nhất, bấm Gửi, kiểm tra lỗi 'Không gửi được' và retry.
     """
     try:
         abs_path = os.path.abspath(video_path)
         if not os.path.exists(abs_path):
             print(f"❌ File video không tồn tại: {abs_path}")
             return False
+
+        # Kiểm tra kích thước file
+        file_size_mb = os.path.getsize(abs_path) / (1024 * 1024)
+        print(f"📦 Kích thước file video: {file_size_mb:.1f} MB")
+        if file_size_mb > ZALO_MAX_VIDEO_MB:
+            print(f"⚠️ Video {file_size_mb:.1f}MB vượt quá {ZALO_MAX_VIDEO_MB}MB! Zalo có thể không gửi được.")
+            send_zalo_message(d, f"⚠️ Video quá nặng ({file_size_mb:.0f}MB), Zalo chỉ hỗ trợ tối đa {ZALO_MAX_VIDEO_MB}MB. Tẻn thử gửi nhé...")
 
         if not abs_path.lower().endswith(".mp4"):
             new_mp4 = os.path.splitext(abs_path)[0] + ".mp4"
@@ -264,82 +274,103 @@ def send_zalo_video_android(d, video_path):
                 pass
 
         remote_android_path = "/sdcard/DCIM/Camera/temp_bot_video.mp4"
+
+        # Xóa file cũ trước khi đẩy file mới để tránh nhầm lẫn
+        d.shell(f"rm -f {remote_android_path}")
+        time.sleep(0.5)
         
         print("📲 Đang đẩy video vào thư viện Android LDPlayer...")
         d.push(abs_path, remote_android_path)
         time.sleep(1)
 
-        # Broadcast MediaScanner để Zalo Android cập nhật ngay video mới
+        # Broadcast MediaScanner 2 lần để đảm bảo Zalo cập nhật ngay file mới
+        d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
+        time.sleep(2)  # Tăng thời gian chờ để Thư viện Zalo index xong
         d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
         time.sleep(1.5)
 
-        # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo
-        print("🖼️ Đang mở Thư viện media Zalo...")
-        photo_btn = d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery")
-        if photo_btn.exists:
-            photo_btn.click()
-            time.sleep(2)
-        else:
-            d.click(850, 1110)
-            time.sleep(2)
+        for attempt in range(2):  # Thử gửi tối đa 2 lần
+            if attempt > 0:
+                print(f"🔄 Thử lại lần {attempt + 1} do lỗi gửi video...")
+                time.sleep(2)
 
-        # Chọn video đầu tiên (Ô thứ 2 bên cạnh ô Chụp ảnh - Tọa độ chuẩn từ XML Dump [301,1160][599,1458])
-        print("🎬 Đang chọn video mới nhất...")
-        video_item = None
-        video_selectors = [
-            d.xpath("//*[contains(@text, ':')]"),
-            d.xpath("//*[@resource-id='com.zing.zalo:id/media_picker_layout']//android.widget.FrameLayout[2]"),
-            d(resourceId="com.zing.zalo:id/iv_thumb")
-        ]
-        for v_sel in video_selectors:
-            if v_sel.exists:
-                video_item = v_sel
-                break
+            # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo
+            print("🖼️ Đang mở Thư viện media Zalo...")
+            photo_btn = d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery")
+            if photo_btn.exists:
+                photo_btn.click()
+                time.sleep(2.5)
+            else:
+                d.click(850, 1110)
+                time.sleep(2.5)
 
-        if video_item:
-            video_item.click()
-            time.sleep(1)
-        else:
-            # Click tâm ô Video thứ 2 (X=450, Y=1309)
-            d.click(450, 1309)
-            time.sleep(1)
+            # Chọn video đầu tiên (ô mới nhất)
+            print("🎬 Đang chọn video mới nhất...")
+            video_item = None
+            video_selectors = [
+                d.xpath("//*[@resource-id='com.zing.zalo:id/media_picker_layout']//android.widget.FrameLayout[2]"),
+                d(resourceId="com.zing.zalo:id/iv_thumb")
+            ]
+            for v_sel in video_selectors:
+                if v_sel.exists:
+                    video_item = v_sel
+                    break
 
-        # Bật chế độ HD nếu có
-        hd_option = d(resourceId="com.zing.zalo:id/btn_hd") or d(text="HD")
-        if hd_option.exists:
-            try:
-                hd_option.click()
-                time.sleep(0.5)
-            except Exception:
-                pass
+            if video_item:
+                video_item.click()
+                time.sleep(1)
+            else:
+                d.click(450, 1309)
+                time.sleep(1)
 
-        # Nhấp nút Gửi
-        send_btn = None
-        send_selectors = [
-            d(resourceId="com.zing.zalo:id/btn_send"),
-            d(resourceId="com.zing.zalo:id/chat_btn_send"),
-            d(resourceId="com.zing.zalo:id/btn_chat_send"),
-            d(text="Gửi"),
-            d(textContains="Gửi"),
-            d(description="Gửi")
-        ]
-        for s_btn in send_selectors:
-            if s_btn.exists:
-                send_btn = s_btn
-                break
+            # Bật chế độ HD nếu có
+            hd_option = d(resourceId="com.zing.zalo:id/btn_hd") or d(text="HD")
+            if hd_option.exists:
+                try:
+                    hd_option.click()
+                    time.sleep(0.5)
+                except Exception:
+                    pass
 
-        if send_btn:
-            send_btn.click()
-        else:
-            # Click góc dưới bên phải nút Gửi (X=820, Y=1550)
-            d.click(820, 1550)
+            # Nhấp nút Gửi
+            send_btn = None
+            for s_sel in [
+                d(resourceId="com.zing.zalo:id/btn_send"),
+                d(resourceId="com.zing.zalo:id/chat_btn_send"),
+                d(resourceId="com.zing.zalo:id/btn_chat_send"),
+                d(text="Gửi"),
+                d(description="Gửi")
+            ]:
+                if s_sel.exists:
+                    send_btn = s_sel
+                    break
 
-        print("🚀 Đã phát video thành công vào nhóm Zalo Android!")
-        time.sleep(3)
+            if send_btn:
+                send_btn.click()
+            else:
+                d.click(820, 1550)
 
-        # Xóa và làm sạch file tạm trên cả Android LDPlayer lẫn máy tính (PC)
+            time.sleep(4)
+
+            # Kiểm tra lỗi "Không gửi được" xuất hiện trên màn hình
+            if d(textContains="Không gửi được").exists or d(textContains="Gửi thất bại").exists:
+                print(f"⚠️ Phát hiện lỗi gửi video (lần {attempt + 1})! Sẽ thử lại...")
+                # Bấm Back để quay về phòng chat trước khi thử lại
+                d.press("back")
+                time.sleep(1)
+                if not is_in_chat_room(d):
+                    start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
+                continue  # Thử lại
+
+            print("🚀 Đã phát video thành công vào nhóm Zalo Android!")
+            cleanup_temp_videos(d, abs_path)
+            return True
+
+        # Sau 2 lần thử vẫn không gửi được
+        print("❌ Không thể gửi video sau 2 lần thử. Video quá nặng hoặc định dạng không hỗ trợ.")
+        send_zalo_message(d, "❌ Video tải về quá nặng, Zalo không gửi được. Sếp thử link khác nhé!")
         cleanup_temp_videos(d, abs_path)
-        return True
+        return False
     except Exception as e:
         print(f"❌ Lỗi gửi video Android: {e}")
     return False
