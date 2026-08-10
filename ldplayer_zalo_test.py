@@ -628,6 +628,24 @@ def send_zalo_photo_android(d, photo_path):
         print(f"❌ Lỗi gửi ảnh Zalo: {e}")
         return False
 
+processed_messages = set()
+
+def is_already_processed(msg):
+    """Kiểm tra xem tin nhắn/thông báo này đã được xử lý trước đó hay chưa."""
+    if not msg:
+        return True
+    clean_msg = msg.strip()
+    return clean_msg in processed_messages
+
+def mark_as_processed(msg):
+    """Lưu vết tin nhắn đã xử lý để chống lặp lại hành động."""
+    if not msg:
+        return
+    clean_msg = msg.strip()
+    processed_messages.add(clean_msg)
+    if len(processed_messages) > 100:
+        processed_messages.clear()
+
 def main():
     d = init_ldplayer()
     if not d:
@@ -665,8 +683,9 @@ def main():
                     continue
 
                 msg_text = get_latest_chat_message(d)
-                if msg_text and msg_text != last_text:
+                if msg_text and msg_text != last_text and not is_already_processed(msg_text):
                     last_text = msg_text
+                    mark_as_processed(msg_text)
                     print(f"📩 [Scan Result] Đã phát hiện tin nhắn mới: '{msg_text}'")
                     
                     if msg_text.startswith("/ping"):
