@@ -42,29 +42,25 @@ def init_ldplayer():
 def normalize_video_url(url):
     """
     Chuẩn hóa URL Facebook/TikTok/YouTube trước khi đưa vào downloader.
-    Tự động trích xuất ID số chuẩn của FB Reel/Watch/Video (ví dụ: 1498614348705271) ngay cả khi bị dính chuỗi lượt xem '49K'.
+    - Giữ nguyên dạng share/v/... (short link FB) để yt-dlp tự redirect.
+    - Trích xuất ID số chỉ khi có đường dẫn reel/watch/videos/video.
     """
     url_str = str(url).strip().strip("<>").strip()
     if any(domain in url_str.lower() for domain in ["facebook.com", "fb.watch", "fb.gg"]):
-        # 1. Thử trích xuất theo đường dẫn dạng facebook.com/reel/1498614348705271 hoặc watch/?v=1498614348705271
-        match = re.search(r'facebook\.com/(?:reel|watch|videos|share/[rv])/(\d{10,16})', url_str)
+        # 1. Các URL dạng share/v/ hoặc share/r/ là short link hợp lệ - GIỮ NGUYÊN
+        if re.search(r'facebook\.com/share/[vr]/', url_str):
+            return url_str
+
+        # 2. Trích xuất ID số cho reel/watch/videos
+        match = re.search(r'facebook\.com/(?:reel|watch|videos|video)/(\d{10,16})', url_str)
         if match:
-            return f"https://www.facebook.com/{match.group(1)}"
-            
-        # 2. Thử trích xuất ID số 10-16 chữ số bất kỳ
-        match_id = re.search(r'(\d{10,16})', url_str)
-        if match_id:
-            return f"https://www.facebook.com/{match_id.group(1)}"
-            
-        try:
-            r = requests.head(url_str, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, allow_redirects=True, timeout=5)
-            final_url = r.url
-            match_final = re.search(r'(\d{10,16})', final_url)
-            if match_final:
-                return f"https://www.facebook.com/{match_final.group(1)}"
-            return final_url
-        except Exception:
-            pass
+            return f"https://www.facebook.com/videos/{match.group(1)}"
+
+        # 3. Tham số v= (watch?v=...)
+        match_v = re.search(r'[?&]v=(\d{10,16})', url_str)
+        if match_v:
+            return f"https://www.facebook.com/videos/{match_v.group(1)}"
+
     return url_str
 
 FB_COOKIE_FILE = os.path.join(BASE_DIR, "fb_cookies.txt")  # Export từ extension EditThisCookie/Get cookies.txt
@@ -92,12 +88,10 @@ def download_video_web(target_url, output_dir):
         # Danh sách các chiến lược thử theo thứ tự ưu tiên
         strategies = []
         if is_facebook:
-            # 1. Ưu tiên: Cookie Chrome (yt-dlp tự đọc, hỗ trợ App-Bound Encryption Chrome 127+)
-            strategies.append(("Chrome cookies", {**base_opts, 'cookiesfrombrowser': ('chrome',)}))
-            # 2. Fallback: File cookie xuất từ extension (EditThisCookie, Get cookies.txt...)
+            # 1. File cookie xuất từ extension (EditThisCookie, Get cookies.txt...)
             if os.path.exists(FB_COOKIE_FILE):
                 strategies.append(("fb_cookies.txt", {**base_opts, 'cookiefile': FB_COOKIE_FILE}))
-        # 3. Không có cookie (công khai / TikTok / YouTube)
+        # 2. Không có cookie (công khai / TikTok / YouTube)
         strategies.append(("anonymous", base_opts))
 
         for strategy_name, opts in strategies:
@@ -584,9 +578,10 @@ def main():
                     elif msg_text.startswith("/menu"):
                         send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- Gõ 'stop' ở CMD để tắt ứng dụng ngầm & về Home")
                     elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
-                        url_match = re.search(r'((?:https?://|www\.)[^\s]+)', msg_text)
+                        # Lấy URL: dừng lại ở kí tự trắng hoặc kí tự không phải URL ASCII (tránh dính chữ tiếng Việt sau link)
+                        url_match = re.search(r'((?:https?://|www\.)[A-Za-z0-9_.~:/?#\[\]@!$&\'()*+,;=%\-]+)', msg_text)
                         if url_match:
-                            target_url = url_match.group(1)
+                            target_url = url_match.group(1).rstrip('/.,;:!?)"\'')
                             if target_url.startswith("www."):
                                 target_url = "https://" + target_url
                             print(f"🎬 [Video Handler] Đang xử lý tải URL: {target_url}")
