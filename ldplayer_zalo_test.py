@@ -110,9 +110,19 @@ def is_in_chat_room(d):
 def start_zalo_and_open_chat(d, group_name):
     print("🚀 Đang khởi động ứng dụng Zalo...")
     d.app_start(ZALO_PACKAGE)
-    time.sleep(4)  # Chờ 4s cho Zalo Android mở hẳn
+    time.sleep(3)
 
     # 1. Nếu đã ở trong phòng chat sẵn
+    if is_in_chat_room(d):
+        print(f"✅ Đã ở trong phòng chat sẵn.")
+        return True
+
+    # Nếu đang bị văng vào màn hình phụ/tìm kiếm, bấm Trở về để quay lại màn hình danh sách chat
+    for _ in range(2):
+        if not is_in_chat_room(d) and d(resourceId="com.zing.zalo:id/actionbar_btn_leading").exists:
+            d(resourceId="com.zing.zalo:id/actionbar_btn_leading").click()
+            time.sleep(1)
+
     if is_in_chat_room(d):
         print(f"✅ Đã ở trong phòng chat sẵn.")
         return True
@@ -757,8 +767,10 @@ def send_zalo_photo_android(d, photo_path):
         d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
         time.sleep(1.5)
 
-        start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
-        time.sleep(1.5)
+        # Đảm bảo ở màn hình phòng chat
+        if not is_in_chat_room(d):
+            start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
+            time.sleep(1.5)
 
         print("🖼️ Đang mở Thư viện media Zalo...")
         photo_btn = d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery")
