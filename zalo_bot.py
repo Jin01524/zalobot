@@ -2931,7 +2931,8 @@ def download_video_web(target_url, output_dir):
         unique_id = str(uuid.uuid4())[:8]
         out_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'merge_output_format': 'mp4',
             'outtmpl': out_template,
             'quiet': True,
             'no_warnings': True,
@@ -3087,12 +3088,14 @@ def gui_video_zalo(driver, video_path, caption=""):
             print(f"❌ File video không hợp lệ: {abs_path}")
             return False
 
-        # 🧠 BƯỚC 1: Đưa đường dẫn file video vào input[type='file'] của Zalo
-        # Điều này kích hoạt Zalo Web xử lý Video chuẩn (phát được trực tiếp)
+        # 🧠 BƯỚC 1: Đưa đường dẫn file video vào ô input Media (Ảnh/Video) của Zalo
+        # Ưu tiên input Media (accept image/video) thay vì input File đính kèm (để phát trực tiếp trong Zalo)
         uploaded = False
-        file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
-        if file_inputs:
-            for fi in reversed(file_inputs):
+        media_inputs = driver.find_elements(By.CSS_SELECTOR, "input[accept*='image'], input[accept*='video'], [data-translate-title*='PHOTO'] input, [data-translate-title*='MEDIA'] input")
+        target_inputs = media_inputs if media_inputs else driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+
+        if target_inputs:
+            for fi in target_inputs:
                 try:
                     fi.send_keys(abs_path)
                     uploaded = True
