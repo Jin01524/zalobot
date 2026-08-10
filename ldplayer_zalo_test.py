@@ -465,6 +465,11 @@ def create_story_poll_zalo(d, initiator_name=""):
         print(f"👤 Ghi nhớ người khởi tạo lệnh /storyfb: '{active_poll_initiator}'")
 
     try:
+        # Nếu chưa ở phòng chat (ví dụ còn dính màn hình cũ), bấm Trở về
+        if not is_in_chat_room(d) and d(resourceId="com.zing.zalo:id/actionbar_btn_leading").exists:
+            d(resourceId="com.zing.zalo:id/actionbar_btn_leading").click()
+            time.sleep(1)
+
         print("📊 Đang tiến hành tạo Bình chọn Story FB trong nhóm Zalo...")
         send_zalo_message(d, "📊 Tẻn đang tạo Bảng Bình Chọn danh sách bạn bè để sếp lựa chọn nhé...")
         time.sleep(1)
@@ -689,9 +694,9 @@ def exit_to_android_home(d):
 
 def check_and_send_fb_story(d, friend_keyword=None):
     """
-    Tự động vào Facebook Lite (com.facebook.lite), kiểm tra Tin mới của bạn bè cụ thể:
+    Tự động vào Facebook Lite (com.facebook.lite), kiểm tra Story của bạn bè cụ thể:
     - Nếu là 'Tuân': Thông báo '⚠️ Tuân chưa đồng ý kết bạn với Tẻn nên chưa thể xem Story nhé!'
-    - Các bạn bè khác: Mở FB Lite, xem Story, chụp ảnh màn hình và gửi vào Zalo.
+    - Các bạn bè khác: Tìm chính xác Story bạn bè trên FB Lite (hoặc qua ô tìm kiếm), chụp màn hình và gửi vào Zalo.
     """
     if friend_keyword:
         key_clean = friend_keyword.strip().lower()
@@ -713,24 +718,68 @@ def check_and_send_fb_story(d, friend_keyword=None):
     send_zalo_message(d, f"🔎 Tẻn đang qua Facebook Lite kiểm tra Story của {friend_disp_name}...")
 
     try:
+        d.app_stop("com.zing.zalo")
         d.app_start("com.facebook.lite")
         time.sleep(4)
 
-        # Mở Tin mới của bạn bè
+        # Xử lý popup OK của Facebook Lite nếu xuất hiện
+        if d(text="OK").exists:
+            d(text="OK").click()
+            time.sleep(1.5)
+
         opened_story = False
-        if target_info and target_info["name"]:
-            name_item = d(textContains=target_info["name"])
-            if name_item.exists:
-                name_item.click()
-                opened_story = True
+        target_name = target_info["name"] if target_info else ""
+        
+        # 1. Tìm Story trên khay Story giao diện chính FB Lite (Vuốt khay Story nếu cần)
+        search_terms = [target_name]
+        if " " in target_name:
+            search_terms.extend(target_name.split())
+        
+        for _ in range(4): # Thử vuốt khay story tối đa 4 lần
+            for term in search_terms:
+                if len(term) >= 2:
+                    match_item = d(textContains=term)
+                    if match_item.exists:
+                        print(f"🎯 [FB Lite] Tìm thấy ô Story của '{term}', đang nhấp xem...")
+                        match_item.click()
+                        opened_story = True
+                        time.sleep(3)
+                        break
+            if opened_story:
+                break
+            # Vuốt sang phải khay Story (từ X=800 sang X=200 tại Y=600)
+            d.swipe(800, 600, 200, 600, duration=0.2)
+            time.sleep(1)
+
+        # 2. Nếu chưa thấy trên khay Story, dùng ô Tìm kiếm FB Lite để vào trang cá nhân xem Story
+        if not opened_story and target_name:
+            print(f"🔍 [FB Lite] Đang tìm kiếm trang cá nhân của '{target_name}' trên FB Lite...")
+            search_btn = d(description="Search") or d(description="Tìm kiếm") or d(resourceId="com.facebook.lite:id/main_tab_search")
+            if search_btn.exists:
+                search_btn.click()
+                time.sleep(1.5)
+            else:
+                d.click(770, 110)
+                time.sleep(1.5)
+
+            search_edit = d(className="android.widget.EditText")
+            if search_edit.exists:
+                search_edit.set_text(target_name)
+                time.sleep(1)
+                d.press("enter")
                 time.sleep(3)
 
-        if not opened_story:
-            # Click ô Story thứ 2 tại X=450, Y=640
-            d.click(450, 640)
-            time.sleep(3)
+                # Nhấp vào kết quả trang cá nhân đầu tiên
+                first_result = d(textContains=target_name) or d(textContains=target_name.split()[-1])
+                if first_result.exists:
+                    first_result.click()
+                    time.sleep(3)
+                    # Click ảnh đại diện / vòng Story
+                    d.click(200, 350)
+                    opened_story = True
+                    time.sleep(3)
 
-        # Xử lý popup OK của Facebook Lite nếu lần đầu mở Tin
+        # Xử lý popup OK của Facebook Lite nếu xuất hiện khi vào Story
         if d(text="OK").exists:
             d(text="OK").click()
             time.sleep(2)
