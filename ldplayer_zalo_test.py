@@ -696,7 +696,7 @@ def check_and_send_fb_story(d, friend_keyword=None):
     """
     Tự động vào Facebook Lite (com.facebook.lite), kiểm tra Story của bạn bè cụ thể:
     - Nếu là 'Tuân': Thông báo '⚠️ Tuân chưa đồng ý kết bạn với Tẻn nên chưa thể xem Story nhé!'
-    - Các bạn bè khác: Tìm chính xác Story bạn bè trên FB Lite (hoặc qua ô tìm kiếm), chụp màn hình và gửi vào Zalo.
+    - Các bạn bè khác: Tìm chính xác Story bạn bè trên FB Lite (hoặc qua trang cá nhân), chụp màn hình và gửi vào Zalo.
     """
     if friend_keyword:
         key_clean = friend_keyword.strip().lower()
@@ -719,6 +719,8 @@ def check_and_send_fb_story(d, friend_keyword=None):
 
     try:
         d.app_stop("com.zing.zalo")
+        d.app_stop("com.facebook.lite")
+        time.sleep(1)
         d.app_start("com.facebook.lite")
         time.sleep(4)
 
@@ -730,12 +732,12 @@ def check_and_send_fb_story(d, friend_keyword=None):
         opened_story = False
         target_name = target_info["name"] if target_info else ""
         
-        # 1. Tìm Story trên khay Story giao diện chính FB Lite (Vuốt khay Story nếu cần)
+        # 1. Tìm Story trên khay Story trang chủ FB Lite (Vuốt khay Story nếu cần)
         search_terms = [target_name]
         if " " in target_name:
             search_terms.extend(target_name.split())
         
-        for _ in range(4): # Thử vuốt khay story tối đa 4 lần
+        for _ in range(3):
             for term in search_terms:
                 if len(term) >= 2:
                     match_item = d(textContains=term)
@@ -747,13 +749,12 @@ def check_and_send_fb_story(d, friend_keyword=None):
                         break
             if opened_story:
                 break
-            # Vuốt sang phải khay Story (từ X=800 sang X=200 tại Y=600)
             d.swipe(800, 600, 200, 600, duration=0.2)
             time.sleep(1)
 
-        # 2. Nếu chưa thấy trên khay Story, dùng ô Tìm kiếm FB Lite để vào trang cá nhân xem Story
+        # 2. Nếu chưa xem được trên khay Story, dùng ô Tìm kiếm để vào trang cá nhân
         if not opened_story and target_name:
-            print(f"🔍 [FB Lite] Đang tìm kiếm trang cá nhân của '{target_name}' trên FB Lite...")
+            print(f"🔍 [FB Lite] Mở ô tìm kiếm cá nhân cho '{target_name}'...")
             search_btn = d(description="Search") or d(description="Tìm kiếm") or d(resourceId="com.facebook.lite:id/main_tab_search")
             if search_btn.exists:
                 search_btn.click()
@@ -762,20 +763,43 @@ def check_and_send_fb_story(d, friend_keyword=None):
                 d.click(770, 110)
                 time.sleep(1.5)
 
-            search_edit = d(className="android.widget.EditText")
-            if search_edit.exists:
-                search_edit.set_text(target_name)
-                time.sleep(1)
-                d.press("enter")
+            # Kiểm tra nếu tên bạn bè hiển thị trong danh sách Mới đây (Recent)
+            recent_item = d(text=target_name) or d(textContains=target_name)
+            if recent_item.exists:
+                print(f"🎯 Tìm thấy '{target_name}' trong danh sách Mới đây! Đang nhấp vào...")
+                recent_item.click()
                 time.sleep(3)
-
-                # Nhấp vào kết quả trang cá nhân đầu tiên
-                first_result = d(textContains=target_name) or d(textContains=target_name.split()[-1])
-                if first_result.exists:
-                    first_result.click()
+            else:
+                search_edit = d(className="android.widget.EditText")
+                if search_edit.exists:
+                    search_edit.set_text(target_name)
+                    time.sleep(1)
+                    d.press("enter")
                     time.sleep(3)
-                    # Click ảnh đại diện / vòng Story
-                    d.click(200, 350)
+
+                    result_item = d(textContains=target_name) or d(textContains=target_name.split()[-1])
+                    if result_item.exists:
+                        result_item.click()
+                        time.sleep(3)
+                    else:
+                        d.click(450, 240)
+                        time.sleep(3)
+
+            # 3. Trên trang cá nhân: Nhấp vào Ảnh đại diện / nút "Xem tin"
+            print(f"👉 Đang nhấp vào Ảnh đại diện / Xem tin của {target_name}...")
+            story_menu_btn = d(text="Xem tin") or d(textContains="Xem tin") or d(textContains="Tin")
+            if story_menu_btn.exists:
+                story_menu_btn.click()
+                opened_story = True
+                time.sleep(3)
+            else:
+                # Click vị trí ảnh đại diện trên trang cá nhân
+                d.click(450, 380)
+                time.sleep(2)
+                # Nếu hiển thị popup tùy chọn: "Xem tin" / "Xem ảnh đại diện"
+                view_story_popup = d(text="Xem tin") or d(textContains="Xem tin") or d(textContains="Tin")
+                if view_story_popup.exists:
+                    view_story_popup.click()
                     opened_story = True
                     time.sleep(3)
 
