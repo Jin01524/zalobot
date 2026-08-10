@@ -317,21 +317,35 @@ def send_zalo_video_android(d, video_path):
         return False
 
 def get_latest_chat_message(d):
-    """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat."""
+    """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat qua XPath và UiSelector."""
     try:
-        msg_selectors = [
-            d(resourceId="com.zing.zalo:id/tv_message"),
-            d(resourceId="com.zing.zalo:id/chat_message_text"),
-            d(resourceId="com.zing.zalo:id/message_text"),
-            d(resourceId="com.zing.zalo:id/cell_title_tv")
+        # Cách 1: Thử tìm theo resourceId tin nhắn Zalo Android chuẩn
+        res_ids = [
+            "com.zing.zalo:id/tv_message",
+            "com.zing.zalo:id/chat_message_text",
+            "com.zing.zalo:id/message_text",
+            "com.zing.zalo:id/cell_title_tv"
         ]
-        for sel in msg_selectors:
-            if sel.exists:
-                messages = [el for el in sel if el.get_text()]
-                if messages:
-                    return messages[-1].get_text()
-    except Exception:
-        pass
+        for r_id in res_ids:
+            xpath_elems = d.xpath(f"//*[@resource-id='{r_id}']").all()
+            if xpath_elems:
+                texts = [e.text.strip() for e in xpath_elems if e.text and e.text.strip()]
+                if texts:
+                    return texts[-1]
+
+        # Cách 2: Fallback lấy tất cả TextView có sẵn trong cuộc hội thoại
+        all_text_views = d.xpath("//android.widget.TextView").all()
+        if all_text_views:
+            valid_texts = []
+            for item in all_text_views:
+                t = item.text.strip() if item.text else ""
+                # Bỏ qua nhãn giao diện hệ thống Zalo
+                if t and t not in ["Tin nhắn", "Gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo"] and not t.endswith("thành viên"):
+                    valid_texts.append(t)
+            if valid_texts:
+                return valid_texts[-1]
+    except Exception as e:
+        print(f"⚠️ Lỗi đọc tin nhắn: {e}")
     return None
 
 def main():
