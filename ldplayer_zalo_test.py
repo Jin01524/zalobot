@@ -364,46 +364,70 @@ def cleanup_temp_videos(d, local_video_path=None):
     except Exception as e:
         print(f"⚠️ Lỗi dọn dẹp Android: {e}")
 
-def is_timestamp_or_status(s):
-    """Kiểm tra xem chuỗi có phải là mốc thời gian (vd: 22:33, 07:15), tên nhóm header hoặc trạng thái giao diện không."""
-    s_clean = s.strip()
-    if re.match(r'^\d{1,2}:\d{2}$', s_clean):
-        return True
-    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Search games", "Không có mục gần đây nào", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi", "Xem cập nhật trước", "Xem"]:
-        return True
-    if "không phản hồi" in s_clean or "không phản hồi" in s_clean.lower():
-        return True
-    return False
-
-def get_latest_chat_message(d):
-    """Đọc nội dung tin nhắn văn bản CHÍNH XÁC từ danh sách chatlinelist (Dựa trên XML Dump chuẩn)."""
+def extract_latest_chat_record(d):
+    """
+    Trích xuất chi tiết tin nhắn mới nhất từ danh sách chatlinelist bao gồm:
+    - sender: Tên người gửi (Ví dụ: 'Võ Ngọc Bình', 'Tâm'...)
+    - timestamp: Mốc thời gian gửi (Ví dụ: '00:13', '00:19')
+    - content: Nội dung tin nhắn chính xác
+    - signature: Khóa vân tay đối chiếu duy nhất (sender|timestamp|content)
+    """
     try:
-        # Lấy tất cả item tin nhắn trong chatlinelist (chuẩn 100% từ XML Dump)
         items = d.xpath("//*[@resource-id='com.zing.zalo:id/chatlinelist']/*").all()
         if items:
             for item in reversed(items):
                 full_text = item.text or ""
-                if not full_text:
-                    child_texts = [c.text.strip() for c in item.xpath(".//android.widget.TextView").all() if c.text]
-                    full_text = "\n".join(child_texts)
+                lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+                if not lines:
+                    continue
 
-                if full_text:
-                    # Bỏ qua nếu là tin nhắn do Bot gửi
-                    if "Tẻn Android Bot" in full_text or "kết nối trực tiếp thành công" in full_text or "Tẻn đang tạo Bảng Bình Chọn" in full_text:
+                timestamp = ""
+                sender = ""
+                content = ""
+
+                # 1. Tìm mốc thời gian (vd: 00:13, 23:45)
+                for t in lines:
+                    if re.match(r'^\d{1,2}:\d{2}$', t):
+                        timestamp = t
+                        break
+
+                # 2. Tách người gửi và nội dung
+                valid_lines = [t for t in lines if not re.match(r'^\d{1,2}:\d{2}$', t) and not is_timestamp_or_status(t)]
+                if valid_lines:
+                    full_str = " ".join(valid_lines)
+                    if "Tẻn Android Bot" in full_str or "kết nối trực tiếp thành công" in full_str or "Tẻn đang tạo Bảng Bình Chọn" in full_str:
                         continue
-                    
-                    # Ưu tiên lấy dòng chứa lệnh (/video, /v, /storyfb, /story, /ping, /menu) hoặc chứa link (http, www) hoặc thông báo bình chọn
-                    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
-                    for line in lines:
-                        if line.startswith("/") or "http" in line or "www." in line or "bình chọn" in line.lower() or "tham gia" in line.lower() or "chọn" in line.lower():
-                            if not is_timestamp_or_status(line):
-                                return line
-                    if lines:
-                        valid_lines = [l for l in lines if not is_timestamp_or_status(l)]
-                        if valid_lines:
-                            return valid_lines[0]
+
+                    # Ưu tiên tìm dòng chứa lệnh hoặc thông báo bình chọn
+                    cmd_line = ""
+                    for l in valid_lines:
+                        if l.startswith("/") or "http" in l or "www." in l or "bình chọn" in l.lower() or "tham gia" in l.lower() or "chọn" in l.lower():
+                            cmd_line = l
+                            break
+
+                    if cmd_line:
+                        content = cmd_line
+                    else:
+                        content = valid_lines[0]
+
+                    if len(valid_lines) >= 2 and not valid_lines[0].startswith('/'):
+                        sender = valid_lines[0]
+                    else:
+                        if " tham gia cuộc bình chọn" in content:
+                            sender = content.split(" tham gia cuộc bình chọn")[0].strip()
+                        elif " bình chọn" in content:
+                            sender = content.split(" bình chọn")[0].strip()
+
+                if content:
+                    signature = f"{sender}|{timestamp}|{content}"
+                    return {
+                        "sender": sender,
+                        "timestamp": timestamp,
+                        "content": content,
+                        "signature": signature
+                    }
     except Exception as e:
-        print(f"⚠️ Lỗi đọc chatlinelist: {e}")
+        print(f"⚠️ Lỗi đọc chat record: {e}")
     return None
 
 def check_poll_vote_and_trigger(d, msg_text):
