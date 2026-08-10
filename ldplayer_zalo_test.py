@@ -122,7 +122,8 @@ def send_zalo_message(d, text_msg):
             d(resourceId="com.zing.zalo:id/chat_input_text"),
             d(resourceId="com.zing.zalo:id/input_chat"),
             d(resourceId="com.zing.zalo:id/input_chat_text"),
-            d(hint="Tin nhắn"),
+            d(text="Tin nhắn"),
+            d(textContains="Tin nhắn"),
             d(className="android.widget.EditText")
         ]
         for sel in selectors:
