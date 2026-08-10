@@ -364,6 +364,17 @@ def cleanup_temp_videos(d, local_video_path=None):
     except Exception as e:
         print(f"⚠️ Lỗi dọn dẹp Android: {e}")
 
+def is_timestamp_or_status(s):
+    """Kiểm tra xem chuỗi có phải là mốc thời gian (vd: 22:33, 07:15), tên nhóm header hoặc trạng thái giao diện không."""
+    s_clean = s.strip()
+    if re.match(r'^\d{1,2}:\d{2}$', s_clean):
+        return True
+    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Search games", "Không có mục gần đây nào", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi", "Xem cập nhật trước", "Xem"]:
+        return True
+    if "không phản hồi" in s_clean or "không phản hồi" in s_clean.lower():
+        return True
+    return False
+
 def extract_latest_chat_record(d):
     """
     Trích xuất chi tiết tin nhắn mới nhất từ danh sách chatlinelist bao gồm:
