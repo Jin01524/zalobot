@@ -1,11 +1,15 @@
 import time
 import os
+import re
+import uuid
+import requests
 import uiautomator2 as u2
 
 # Cấu hình địa chỉ ADB LDPlayer (Mặc định LDPlayer 9 là 127.0.0.1:5555 hoặc 127.0.0.1:62001)
 LDPLAYER_ADB = "127.0.0.1:5555" 
 ZALO_PACKAGE = "com.zing.zalo"
 TARGET_GROUP_NAME = "Nà ná na na"  # Tên nhóm chat mẫu
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def init_ldplayer():
     print(f"🔌 Đang kết nối tới LDPlayer tại {LDPLAYER_ADB}...")
@@ -17,6 +21,60 @@ def init_ldplayer():
         print(f"❌ Không thể kết nối ADB LDPlayer: {e}")
         print("💡 Gợi ý: Hãy kiểm tra xem LDPlayer đã bật tính năng ADB Debugging chưa.")
         return None
+
+def normalize_video_url(url):
+    """
+    Chuẩn hóa URL Facebook/TikTok/YouTube trước khi đưa vào downloader.
+    Tự động trích xuất ID số (10-20 chữ số) từ link share/watch/reel/fb.watch để tránh lỗi yt-dlp.
+    """
+    url_str = str(url).strip().strip("<>").strip()
+    if any(domain in url_str.lower() for domain in ["facebook.com", "fb.watch", "fb.gg"]):
+        match = re.search(r'(\d{10,20})', url_str)
+        if match:
+            return f"https://www.facebook.com/{match.group(1)}"
+        try:
+            r = requests.head(url_str, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, allow_redirects=True, timeout=5)
+            final_url = r.url
+            match_final = re.search(r'(\d{10,20})', final_url)
+            if match_final:
+                return f"https://www.facebook.com/{match_final.group(1)}"
+            return final_url
+        except Exception:
+            pass
+    return url_str
+
+def download_video_web(target_url, output_dir):
+    """Tải video đa nền tảng bằng yt-dlp trực tiếp."""
+    target_url = normalize_video_url(target_url)
+    try:
+        import yt_dlp
+        unique_id = str(uuid.uuid4())[:8]
+        out_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
+        ydl_opts = {
+            'format': 'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'merge_output_format': 'mp4',
+            'outtmpl': out_template,
+            'quiet': True,
+            'no_warnings': True,
+            'max_filesize': 100 * 1024 * 1024, # 100MB
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(target_url, download=True)
+            filename = ydl.prepare_filename(info)
+            if os.path.exists(filename) and os.path.getsize(filename) > 50000:
+                if not filename.lower().endswith(".mp4"):
+                    new_mp4 = os.path.splitext(filename)[0] + ".mp4"
+                    try:
+                        os.rename(filename, new_mp4)
+                        filename = new_mp4
+                    except Exception:
+                        pass
+                print(f"✅ [yt-dlp] Tải video thành công: {filename}")
+                return filename
+    except Exception as e:
+        print(f"⚠️ [yt-dlp] Lỗi tải video: {e}")
+    return None
 
 def is_in_chat_room(d):
     """Kiểm tra xem hiện tại có phải đang ở trong màn hình phòng chat hay không."""
@@ -117,7 +175,6 @@ def send_zalo_message(d, text_msg):
     """Gửi tin nhắn văn bản (CHỈ GỬI KHI ĐÃ Ở TRONG PHÒNG CHAT)."""
     try:
         input_box = None
-        # Kiểm tra lần lượt các selector ô nhập tin nhắn Zalo Android
         selectors = [
             d(resourceId="com.zing.zalo:id/chat_input_text"),
             d(resourceId="com.zing.zalo:id/input_chat"),
@@ -160,6 +217,105 @@ def send_zalo_message(d, text_msg):
         print(f"⚠️ Lỗi gửi tin nhắn: {e}")
     return False
 
+def send_zalo_video_android(d, video_path):
+    """
+    Gửi Video MXH trực tiếp vào nhóm chat Zalo Android qua LDPlayer:
+    1. Push file .mp4 từ máy tính vào thẻ nhớ Android (/sdcard/DCIM/Camera/temp_bot_video.mp4).
+    2. Gọi MediaScanner để Zalo Android cập nhật video mới vào Thư viện.
+    3. Mở Bộ chọn Thư viện của Zalo, chọn video mới nhất và bấm Gửi HD.
+    """
+    try:
+        abs_path = os.path.abspath(video_path)
+        if not os.path.exists(abs_path):
+            print(f"❌ File video không tồn tại: {abs_path}")
+            return False
+
+        if not abs_path.lower().endswith(".mp4"):
+            new_mp4 = os.path.splitext(abs_path)[0] + ".mp4"
+            try:
+                os.rename(abs_path, new_mp4)
+                abs_path = new_mp4
+            except Exception:
+                pass
+
+        remote_android_path = "/sdcard/DCIM/Camera/temp_bot_video.mp4"
+        
+        print("📲 Đang đẩy video vào thư viện Android LDPlayer...")
+        d.push(abs_path, remote_android_path)
+        time.sleep(1)
+
+        # Broadcast MediaScanner để Zalo Android cập nhật ngay video mới
+        d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
+        time.sleep(1.5)
+
+        # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo
+        print("🖼️ Đang mở Thư viện media Zalo...")
+        photo_btn = None
+        photo_selectors = [
+            d(resourceId="com.zing.zalo:id/btn_photo"),
+            d(resourceId="com.zing.zalo:id/stk_btn_photo"),
+            d(resourceId="com.zing.zalo:id/chat_btn_photo"),
+            d(description="Ảnh"),
+            d(description="Thư viện"),
+            d.xpath("//*[contains(@resource-id, 'photo') or contains(@resource-id, 'media') or contains(@resource-id, 'gallery')]")
+        ]
+        for p_sel in photo_selectors:
+            if p_sel.exists:
+                photo_btn = p_sel
+                break
+
+        if photo_btn:
+            photo_btn.click()
+            time.sleep(2)
+        else:
+            # Click icon Thư viện ảnh ở thanh dưới bên phải ô nhập tin nhắn
+            d.click(660, 1220)
+            time.sleep(2)
+
+        # Bật chế độ HD nếu có
+        hd_option = d(resourceId="com.zing.zalo:id/btn_hd") or d(text="HD")
+        if hd_option.exists:
+            try:
+                hd_option.click()
+                time.sleep(0.5)
+            except Exception:
+                pass
+
+        # Chọn video đầu tiên trong thư viện (Mới nhất ở góc trên bên trái)
+        print("🎬 Đang chọn video mới nhất...")
+        grid_items = (
+            d(resourceId="com.zing.zalo:id/grid_item_photo") or 
+            d(resourceId="com.zing.zalo:id/iv_thumb") or 
+            d(resourceId="com.zing.zalo:id/v_photo_picker") or
+            d.xpath("//android.widget.GridView/*[1]")
+        )
+        if grid_items.exists:
+            grid_items.click()
+            time.sleep(1)
+        else:
+            # Click ô đầu tiên trong grid chọn media
+            d.click(120, 950)
+            time.sleep(1)
+
+        # Nhấp nút Gửi
+        send_btn = (
+            d(resourceId="com.zing.zalo:id/btn_send") or 
+            d(resourceId="com.zing.zalo:id/chat_btn_send") or 
+            d(text="Gửi") or
+            d(textContains="Gửi")
+        )
+        if send_btn.exists:
+            send_btn.click()
+            print("🚀 Đã phát video thành công vào nhóm Zalo Android!")
+            time.sleep(3)
+
+        # Xóa file tạm trên Android sdcard
+        d.shell(f"rm -f {remote_android_path}")
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi gửi video Android: {e}")
+        return False
+
 def get_latest_chat_message(d):
     """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat."""
     try:
@@ -171,7 +327,6 @@ def get_latest_chat_message(d):
         ]
         for sel in msg_selectors:
             if sel.exists:
-                # Đọc text từ element tin nhắn cuối cùng
                 messages = [el for el in sel if el.get_text()]
                 if messages:
                     return messages[-1].get_text()
@@ -200,8 +355,23 @@ def main():
                     if msg_text.startswith("/ping"):
                         send_zalo_message(d, "🏓 Pong! Bot LDPlayer đang phản hồi cực nhanh!")
                     elif msg_text.startswith("/menu"):
-                        send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- Tải video HD phát mượt 100%!")
-                        
+                        send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- Tải video HD phát mượt 100%!")
+                    elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
+                        url_match = re.search(r'(https?://[^\s]+)', msg_text)
+                        if url_match:
+                            target_url = url_match.group(1)
+                            send_zalo_message(d, "⏳ Tẻn đang tải video MXH về nhóm, sếp chờ xíu nhé...")
+                            v_file = download_video_web(target_url, BASE_DIR)
+                            if v_file:
+                                send_zalo_video_android(d, v_file)
+                                try:
+                                    if os.path.exists(v_file):
+                                        os.remove(v_file)
+                                except Exception:
+                                    pass
+                            else:
+                                send_zalo_message(d, "❌ Không thể tải video từ liên kết này!")
+
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n🛑 Đã dừng test bot LDPlayer.")
