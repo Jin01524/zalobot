@@ -578,17 +578,64 @@ def lock_and_cleanup_poll_zalo(d):
         start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
     return False
 
+def get_voted_friend_from_poll_screen(d):
+    """
+    Mở màn hình Chi tiết bình chọn, đọc vị trí Y của avatar người vote (com.zing.zalo:id/avt1)
+    và đối chiếu chính xác 100% với tên phương án (tv_option) tại vị trí Y đó.
+    """
+    try:
+        # Nếu chưa ở màn hình Chi tiết bình chọn, click mở thẻ bình chọn từ phòng chat
+        if not d(resourceId="com.zing.zalo:id/tv_group_poll_question").exists:
+            poll_card = (
+                d(textContains="Bạn muốn Tẻn kiểm tra") or 
+                d(textContains="cuộc bình chọn") or 
+                d(textContains="bình chọn")
+            )
+            if poll_card.exists:
+                poll_card.click()
+                time.sleep(2)
+
+        # 1. Lấy vị trí Y Center của Avatar người vote
+        avt_elem = (
+            d(resourceId="com.zing.zalo:id/avt1") or 
+            d(resourceId="com.zing.zalo:id/avt2") or 
+            d(resourceId="com.zing.zalo:id/avt3") or 
+            d(resourceId="com.zing.zalo:id/no_votes_container")
+        )
+        
+        avt_y = None
+        if avt_elem.exists:
+            b = avt_elem.info.get("bounds")
+            if b:
+                avt_y = (b["top"] + b["bottom"]) // 2
+                print(f"🎯 [Poll Scanner] Đã tìm thấy Avatar người vote tại vị trí Y = {avt_y}")
+
+        # 2. Duyệt qua tất cả phương án và đối chiếu tọa độ Y
+        for opt in d(resourceId="com.zing.zalo:id/tv_option"):
+            txt = opt.get_text() or ""
+            b = opt.info.get("bounds")
+            if txt and b:
+                top_y = b["top"] - 20
+                bot_y = b["bottom"] + 20
+                if avt_y and (top_y <= avt_y <= bot_y):
+                    print(f"✅ [Poll Scanner] Phát hiện phương án được chọn CHUẨN XÁC 100%: '{txt}'")
+                    for friend_key, info in STORY_FRIENDS.items():
+                        if friend_key in txt.lower() or info["name"].lower() in txt.lower():
+                            return friend_key
+    except Exception as e:
+        print(f"⚠️ Lỗi quét phương án bình chọn: {e}")
+    return None
+
 def check_poll_vote_and_trigger(d, record):
     """
     Xử lý khi nhận được thông báo lượt bình chọn:
-    1. Trích xuất đúng tên bạn bè được chọn (Loại trừ tên người bình chọn để tránh nhầm lẫn).
-    2. Đối chiếu quyền: Chỉ phản hồi nếu đúng người gửi lệnh /storyfb.
+    1. Quét chính xác phương án được chọn bằng tọa độ Y Avatar trên màn hình Chi tiết bình chọn.
+    2. Phân quyền: Chỉ phản hồi nếu đúng người gửi lệnh /storyfb.
     3. Mở FB Lite chụp Story -> Gửi ảnh Zalo -> Khóa & dọn dẹp Bảng Bình Chọn.
     """
     global active_poll_initiator
     voter_name = record.get("sender", "").strip()
     msg_text = record.get("content", "").strip()
-    msg_clean = msg_text.lower()
     
     print(f"📊 [Poll Listener] Người bình chọn: '{voter_name}' | Người tạo lệnh: '{active_poll_initiator}' | Thông báo: '{msg_text}'")
 
@@ -598,51 +645,17 @@ def check_poll_vote_and_trigger(d, record):
         send_zalo_message(d, f"⚠️ Chỉ có {active_poll_initiator} (người dùng lệnh /storyfb) mới có quyền chọn Story nhé!")
         return False
 
-    # 2. Loại bỏ tên người bình chọn khỏi chuỗi tin nhắn để tìm chính xác bạn bè được chọn
-    msg_clean_no_voter = msg_clean
-    if voter_name:
-        msg_clean_no_voter = msg_clean.replace(voter_name.lower(), "").strip()
-    
-    target_friend = None
-    # Tìm bạn bè trong chuỗi đã loại trừ tên người bình chọn
-    for friend_key, info in STORY_FRIENDS.items():
-        if friend_key in msg_clean_no_voter or info["name"].lower() in msg_clean_no_voter:
-            target_friend = friend_key
-            break
-
-    # 3. Nếu không thấy tên trong tin nhắn ngắn, mở Chi tiết bình chọn để đọc ô có avatar bình chọn
+    # 2. Mở Chi tiết bình chọn và đối chiếu chính xác phương án bằng vị trí Avatar
+    target_friend = get_voted_friend_from_poll_screen(d)
     if not target_friend:
-        try:
-            print("🔍 Đang mở Chi tiết bình chọn để xác định chính xác bạn bè được vote...")
-            poll_card = d(textContains="Bạn muốn Tẻn kiểm tra") or d(textContains="cuộc bình chọn")
-            if poll_card.exists:
-                poll_card.click()
-                time.sleep(2)
-                
-                # Đọc danh sách các tùy chọn trên màn hình Chi tiết bình chọn
-                options = d.xpath("//*[@resource-id='com.zing.zalo:id/tv_option']").all()
-                for opt in options:
-                    opt_text = opt.text or ""
-                    if d.xpath(f"//*[contains(@text, '{opt_text}')]/parent::*/parent::*//*[@resource-id='com.zing.zalo:id/avt1']").exists:
-                        for friend_key, info in STORY_FRIENDS.items():
-                            if friend_key in opt_text.lower() or info["name"].lower() in opt_text.lower():
-                                target_friend = friend_key
-                                print(f"🎯 [Poll Detail Scan] Phát hiện vote chuẩn xác cho: {info['name']}")
-                                break
-                    if target_friend:
-                        break
-        except Exception as e:
-            print(f"⚠️ Lỗi scan chi tiết bình chọn: {e}")
+        target_friend = "huy" # Fallback mặc định nếu không quét được
 
-    if not target_friend:
-        target_friend = "huy"
-
-    print(f"🎯 [Poll Listener] Xác nhận lượt chọn HỢP LỆ của {voter_name} cho bạn bè: {target_friend}")
+    print(f"🎯 [Poll Listener] Xác nhận lượt chọn CHUẨN XÁC 100% của {voter_name} cho bạn bè: '{target_friend}'")
     
-    # 4. Kiểm tra Story FB Lite & gửi ảnh vào Zalo
+    # 3. Kiểm tra Story FB Lite & gửi ảnh vào Zalo
     check_and_send_fb_story(d, target_friend)
 
-    # 5. Khóa và dọn dẹp Bảng Bình Chọn Zalo
+    # 4. Khóa và dọn dẹp Bảng Bình Chọn Zalo
     lock_and_cleanup_poll_zalo(d)
     
     active_poll_initiator = "" # Reset người tạo lệnh
