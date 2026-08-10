@@ -369,7 +369,7 @@ def is_timestamp_or_status(s):
     s_clean = s.strip()
     if re.match(r'^\d{1,2}:\d{2}$', s_clean):
         return True
-    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Search games", "Không có mục gần đây nào", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi"]:
+    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Search games", "Không có mục gần đây nào", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi", "Xem cập nhật trước", "Xem"]:
         return True
     if "không phản hồi" in s_clean or "không phản hồi" in s_clean.lower():
         return True
@@ -389,22 +389,41 @@ def get_latest_chat_message(d):
 
                 if full_text:
                     # Bỏ qua nếu là tin nhắn do Bot gửi
-                    if "Tẻn Android Bot" in full_text or "kết nối trực tiếp thành công" in full_text:
+                    if "Tẻn Android Bot" in full_text or "kết nối trực tiếp thành công" in full_text or "Tẻn đang tạo Bảng Bình Chọn" in full_text:
                         continue
                     
-                    # Ưu tiên lấy dòng chứa lệnh (/video, /v, /storyfb, /story, /ping, /menu) hoặc chứa link (http, www)
+                    # Ưu tiên lấy dòng chứa lệnh (/video, /v, /storyfb, /story, /ping, /menu) hoặc chứa link (http, www) hoặc thông báo bình chọn
                     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
                     for line in lines:
-                        if line.startswith("/") or "http" in line or "www." in line or any(domain in line for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
-                            return line
+                        if line.startswith("/") or "http" in line or "www." in line or "bình chọn" in line.lower() or "tham gia" in line.lower() or "chọn" in line.lower():
+                            if not is_timestamp_or_status(line):
+                                return line
                     if lines:
-                        # Bỏ qua mốc thời gian (vd: 22:41)
                         valid_lines = [l for l in lines if not is_timestamp_or_status(l)]
                         if valid_lines:
                             return valid_lines[0]
     except Exception as e:
         print(f"⚠️ Lỗi đọc chatlinelist: {e}")
     return None
+
+def check_poll_vote_and_trigger(d, msg_text):
+    """
+    Tự động xử lý khi nhận được thông báo lượt bình chọn từ nhóm Zalo:
+    Ví dụ: 'Võ Ngọc Bình tham gia cuộc bình chọn...' hoặc 'bình chọn cho: Tâm'
+    """
+    msg_clean = msg_text.lower()
+    print(f"📊 [Poll Listener] Đang xử lý sự kiện bình chọn: '{msg_text}'")
+    
+    # 1. Thử tìm tên bạn bè trực tiếp trong nội dung thông báo
+    for friend_key, info in STORY_FRIENDS.items():
+        if friend_key in msg_clean or info["name"].lower() in msg_clean:
+            print(f"🎯 [Poll Listener] Phát hiện lượt chọn cho bạn bè: {info['name']}")
+            check_and_send_fb_story(d, friend_key)
+            return True
+
+    # 2. Nếu không phân tích được tên cụ thể từ câu ngắn, kiểm tra Story bạn bè được mở gần nhất (mặc định Tâm)
+    check_and_send_fb_story(d, "tâm")
+    return True
 
 def exit_to_android_home(d):
     """Tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite...) và quay về màn hình chính Android LDPlayer."""
@@ -661,6 +680,9 @@ def main():
                             check_and_send_fb_story(d, target_name)
                         else:
                             create_story_poll_zalo(d)
+                    elif "cuộc bình chọn" in msg_text.lower() or "bình chọn" in msg_text.lower() or "tham gia" in msg_text.lower():
+                        if "tạo cuộc bình chọn" not in msg_text.lower() and "đang tạo" not in msg_text.lower():
+                            check_poll_vote_and_trigger(d, msg_text)
                     elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
                         url_match = re.search(r'((?:https?://|www\.)[^\s]+)', msg_text)
                         if url_match:
