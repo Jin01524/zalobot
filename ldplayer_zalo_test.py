@@ -316,31 +316,39 @@ def send_zalo_video_android(d, video_path):
         print(f"❌ Lỗi gửi video Android: {e}")
         return False
 
+def is_timestamp_or_status(s):
+    """Kiểm tra xem chuỗi có phải là mốc thời gian (vd: 22:33, 07:15) hoặc trạng thái giao diện không."""
+    s_clean = s.strip()
+    if re.match(r'^\d{1,2}:\d{2}$', s_clean):
+        return True
+    if s_clean in ["Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi"]:
+        return True
+    return False
+
 def get_latest_chat_message(d):
     """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat qua XPath và UiSelector."""
     try:
-        # Cách 1: Thử tìm theo resourceId tin nhắn Zalo Android chuẩn
+        # Cách 1: Thử tìm theo resourceId tin nhắn Zalo Android chuẩn (tv_message, chat_message_text)
         res_ids = [
             "com.zing.zalo:id/tv_message",
             "com.zing.zalo:id/chat_message_text",
             "com.zing.zalo:id/message_text",
-            "com.zing.zalo:id/cell_title_tv"
+            "com.zing.zalo:id/tv_chat_content"
         ]
         for r_id in res_ids:
             xpath_elems = d.xpath(f"//*[@resource-id='{r_id}']").all()
             if xpath_elems:
-                texts = [e.text.strip() for e in xpath_elems if e.text and e.text.strip()]
+                texts = [e.text.strip() for e in xpath_elems if e.text and not is_timestamp_or_status(e.text)]
                 if texts:
                     return texts[-1]
 
-        # Cách 2: Fallback lấy tất cả TextView có sẵn trong cuộc hội thoại
+        # Cách 2: Fallback lấy tất cả TextView có sẵn trong cuộc hội thoại (Loại bỏ mốc thời gian 22:33)
         all_text_views = d.xpath("//android.widget.TextView").all()
         if all_text_views:
             valid_texts = []
             for item in all_text_views:
                 t = item.text.strip() if item.text else ""
-                # Bỏ qua nhãn giao diện hệ thống Zalo
-                if t and t not in ["Tin nhắn", "Gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo"] and not t.endswith("thành viên"):
+                if t and not is_timestamp_or_status(t) and not t.endswith("thành viên"):
                     valid_texts.append(t)
             if valid_texts:
                 return valid_texts[-1]
