@@ -392,15 +392,22 @@ def get_latest_chat_message(d):
     return None
 
 def exit_to_android_home(d):
-    """Thoát Zalo và quay về màn hình chính Android LDPlayer trước khi dừng chương trình."""
-    print("\n🏠 Đang thoát Zalo và quay về màn hình chính Android (LDPlayer)...")
+    """Tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite...) và quay về màn hình chính Android LDPlayer."""
+    print("\n🧹 Đang dọn dẹp và tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite)...")
     try:
         if d:
+            # Force-stop tắt sạch tiến trình Zalo và Facebook Lite khỏi RAM chạy ngầm
+            d.app_stop(ZALO_PACKAGE)
+            d.app_stop("com.facebook.lite")
+            d.shell(f"am force-stop {ZALO_PACKAGE}")
+            d.shell("am force-stop com.facebook.lite")
+            time.sleep(0.5)
+            # Quay về màn hình chính Android Launcher
             d.press("home")
             time.sleep(1)
     except Exception as e:
-        print(f"⚠️ Lỗi bấm nút Home: {e}")
-    print("🛑 Bot đã dừng an toàn và quay về màn hình chính!")
+        print(f"⚠️ Lỗi tắt ứng dụng ngầm: {e}")
+    print("🛑 Bot đã tắt sạch ứng dụng ngầm và quay về màn hình chính an toàn!")
 
 def check_and_send_fb_story(d):
     """
