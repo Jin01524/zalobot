@@ -402,6 +402,100 @@ def exit_to_android_home(d):
         print(f"⚠️ Lỗi bấm nút Home: {e}")
     print("🛑 Bot đã dừng an toàn và quay về màn hình chính!")
 
+def check_and_send_fb_story(d):
+    """
+    Tự động vào Facebook Lite (com.facebook.lite), kiểm tra Tin mới của bạn bè,
+    chụp ảnh màn hình Story và gửi ảnh chụp màn hình đó vào nhóm Zalo.
+    """
+    try:
+        print("🚀 Đang mở ứng dụng Facebook Lite...")
+        send_zalo_message(d, "🔎 Tẻn đang qua Facebook Lite kiểm tra Tin mới của bạn bè...")
+        d.app_start("com.facebook.lite")
+        time.sleep(4)
+
+        # Mở Tin mới của bạn bè (Tìm biểu tượng số 1 hoặc nhấp ô Story thứ 2 tại X=450, Y=640)
+        print("👉 Đang mở Tin mới của bạn bè...")
+        story_badge = d(text="1")
+        if story_badge.exists:
+            story_badge.click()
+        else:
+            d.click(450, 640)
+        time.sleep(3)
+
+        # Xử lý popup OK của Facebook Lite nếu lần đầu mở Tin
+        if d(text="OK").exists:
+            d(text="OK").click()
+            time.sleep(2)
+
+        # Chụp ảnh màn hình Story sắc nét
+        print("📸 Đang chụp ảnh màn hình Story Facebook...")
+        local_png = os.path.join(BASE_DIR, "temp_story_screenshot.png")
+        d.screenshot(local_png)
+        time.sleep(1)
+
+        # Chuyển lại ứng dụng Zalo và mở phòng chat
+        print("📲 Đang chuyển về Zalo để gửi ảnh Story...")
+        start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
+        time.sleep(1)
+
+        # Gửi ảnh vào nhóm Zalo
+        send_zalo_photo_android(d, local_png)
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi kiểm tra Story FB Lite: {e}")
+    return False
+
+def send_zalo_photo_android(d, photo_path):
+    """Gửi ảnh chụp màn hình Story vào nhóm Zalo qua LDPlayer."""
+    try:
+        abs_path = os.path.abspath(photo_path)
+        if not os.path.exists(abs_path):
+            print(f"❌ File ảnh không tồn tại: {abs_path}")
+            return False
+
+        remote_android_path = "/sdcard/DCIM/Camera/temp_story_screenshot.png"
+        d.push(abs_path, remote_android_path)
+        time.sleep(1)
+        d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
+        time.sleep(1.5)
+
+        start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
+        time.sleep(1.5)
+
+        print("🖼️ Đang mở Thư viện media Zalo...")
+        photo_btn = d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery")
+        if photo_btn.exists:
+            photo_btn.click()
+            time.sleep(2)
+        else:
+            d.click(850, 1110)
+            time.sleep(2)
+
+        # Chọn ô ảnh mới nhất tại X=450, Y=1309
+        print("🎬 Đang chọn ảnh Story mới nhất...")
+        d.click(450, 1309)
+        time.sleep(1)
+
+        send_btn = (
+            d(resourceId="com.zing.zalo:id/btn_send") or 
+            d(resourceId="com.zing.zalo:id/chat_btn_send") or 
+            d(text="Gửi") or 
+            d(textContains="Gửi")
+        )
+        if send_btn.exists:
+            send_btn.click()
+        else:
+            d.click(820, 1550)
+
+        print("🚀 Đã phát ảnh Story Facebook thành công vào nhóm Zalo!")
+        time.sleep(3)
+
+        cleanup_temp_videos(d, abs_path)
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi gửi ảnh Zalo: {e}")
+        return False
+
 def main():
     d = init_ldplayer()
     if not d:
@@ -446,7 +540,9 @@ def main():
                     if msg_text.startswith("/ping"):
                         send_zalo_message(d, "🏓 Pong! Bot LDPlayer đang phản hồi cực nhanh!")
                     elif msg_text.startswith("/menu"):
-                        send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- Tải video HD phát mượt 100%!")
+                        send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- /fb hoặc /story (Chụp Story FB Lite gửi Zalo)\n- Gõ 'stop' ở CMD để về Home")
+                    elif msg_text.startswith("/fb") or msg_text.startswith("/story") or msg_text.startswith("/tin") or msg_text.startswith("/checkfb"):
+                        check_and_send_fb_story(d)
                     elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
                         url_match = re.search(r'((?:https?://|www\.)[^\s]+)', msg_text)
                         if url_match:
