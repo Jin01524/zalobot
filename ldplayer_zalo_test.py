@@ -537,57 +537,53 @@ def create_story_poll_zalo(d, initiator_name=""):
         print(f"❌ Lỗi tạo Bình chọn Zalo: {e}")
     return False
 
-def delete_poll_zalo(d):
+def lock_and_cleanup_poll_zalo(d):
     """
-    Tự động xóa Bảng Bình Chọn trong nhóm Zalo sau khi đã phản hồi xong:
-    1. Click mở Bảng Bình Chọn từ phòng chat.
-    2. Click nút 3 chấm (...) góc trên bên phải -> chọn 'Xóa bình chọn'.
-    3. Xác nhận Xóa.
+    Tắt/Khóa Bảng Bình Chọn và quay về phòng chat Zalo an toàn không bị văng app:
+    1. Click 'Khóa bình chọn' trên màn hình Chi tiết bình chọn.
+    2. Bấm nút Back 2 lần để trở lại phòng chat Nà ná na na.
     """
     try:
-        print("🗑️ Đang tiến hành xóa Bảng Bình Chọn trong nhóm Zalo...")
+        print("🧹 Đang tiến hành Khóa/Đóng Bảng Bình Chọn trong Zalo...")
         
-        poll_card = (
-            d(textContains="Bạn muốn Tẻn kiểm tra") or 
-            d(textContains="bình chọn") or 
-            d(textContains="Xem cập nhật trước")
+        # Click 3 chấm góc trên bên phải màn hình Chi tiết bình chọn
+        more_btn = (
+            d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_1") or 
+            d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_2") or 
+            d(description="Xem thêm") or 
+            d(description="Tùy chọn")
         )
-        if poll_card.exists:
-            poll_card.click()
-            time.sleep(2)
+        if more_btn.exists:
+            more_btn.click()
+            time.sleep(1.5)
 
-            more_btn = (
-                d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_1") or 
-                d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_2") or 
-                d(description="Xem thêm") or 
-                d(description="Tùy chọn")
-            )
-            if more_btn.exists:
-                more_btn.click()
+            lock_item = d(text="Khóa bình chọn") or d(textContains="Khóa bình chọn")
+            if lock_item.exists:
+                lock_item.click()
+                print("✅ Đã Khóa Bảng Bình Chọn thành công!")
                 time.sleep(1.5)
 
-                delete_item = d(text="Xóa bình chọn") or d(textContains="Xóa bình chọn") or d(resourceId="com.zing.zalo:id/tv_delete_poll")
-                if delete_item.exists:
-                    delete_item.click()
-                    time.sleep(1.5)
-
-                    confirm_btn = d(resourceId="android:id/button1") or d(text="Xóa") or d(textContains="Xóa")
-                    if confirm_btn.exists:
-                        confirm_btn.click()
-                        print("✅ Đã xóa Bảng Bình Chọn Zalo thành công!")
-                        time.sleep(2)
-                        return True
+        # Quay về phòng chat an toàn bằng nút Back
+        for _ in range(3):
+            if is_in_chat_room(d):
+                break
             d.press("back")
+            time.sleep(1.0)
+            
+        print("✅ Đã quay lại phòng chat Zalo an toàn!")
+        return True
     except Exception as e:
-        print(f"⚠️ Lỗi xóa bình chọn Zalo: {e}")
+        print(f"⚠️ Lỗi khóa/dọn dẹp bình chọn Zalo: {e}")
+        # Đảm bảo vẫn quay về phòng chat nếu có lỗi
+        start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
     return False
 
 def check_poll_vote_and_trigger(d, record):
     """
     Xử lý khi nhận được thông báo lượt bình chọn:
-    1. Đối chiếu xem người vừa bình chọn có phải người đã phát lệnh /storyfb hay không.
-    2. Nếu đúng: Phản hồi chụp Story FB Lite -> Gửi Zalo -> Xóa Bảng Bình Chọn.
-    3. Nếu không phải người phát lệnh: Bỏ qua và thông báo nhắc nhở.
+    1. Trích xuất đúng tên bạn bè được chọn (Loại trừ tên người bình chọn để tránh nhầm lẫn).
+    2. Đối chiếu quyền: Chỉ phản hồi nếu đúng người gửi lệnh /storyfb.
+    3. Mở FB Lite chụp Story -> Gửi ảnh Zalo -> Khóa & dọn dẹp Bảng Bình Chọn.
     """
     global active_poll_initiator
     voter_name = record.get("sender", "").strip()
@@ -596,26 +592,58 @@ def check_poll_vote_and_trigger(d, record):
     
     print(f"📊 [Poll Listener] Người bình chọn: '{voter_name}' | Người tạo lệnh: '{active_poll_initiator}' | Thông báo: '{msg_text}'")
 
-    # Kiểm tra quyền: Chỉ người gửi lệnh /storyfb mới được quyền chọn
+    # 1. Phân quyền người dùng lệnh:
     if active_poll_initiator and voter_name and active_poll_initiator.lower() not in voter_name.lower() and voter_name.lower() not in active_poll_initiator.lower():
         print(f"⚠️ '{voter_name}' không phải người dùng lệnh '{active_poll_initiator}' -> Từ chối phản hồi!")
         send_zalo_message(d, f"⚠️ Chỉ có {active_poll_initiator} (người dùng lệnh /storyfb) mới có quyền chọn Story nhé!")
         return False
 
-    # Đúng người tạo lệnh: tiến hành phản hồi
-    target_friend = "tâm"
+    # 2. Loại bỏ tên người bình chọn khỏi chuỗi tin nhắn để tìm chính xác bạn bè được chọn
+    msg_clean_no_voter = msg_clean
+    if voter_name:
+        msg_clean_no_voter = msg_clean.replace(voter_name.lower(), "").strip()
+    
+    target_friend = None
+    # Tìm bạn bè trong chuỗi đã loại trừ tên người bình chọn
     for friend_key, info in STORY_FRIENDS.items():
-        if friend_key in msg_clean or info["name"].lower() in msg_clean:
+        if friend_key in msg_clean_no_voter or info["name"].lower() in msg_clean_no_voter:
             target_friend = friend_key
             break
 
-    print(f"🎯 [Poll Listener] Xác nhận lượt chọn hợp lệ của {voter_name} cho bạn bè: {target_friend}")
+    # 3. Nếu không thấy tên trong tin nhắn ngắn, mở Chi tiết bình chọn để đọc ô có avatar bình chọn
+    if not target_friend:
+        try:
+            print("🔍 Đang mở Chi tiết bình chọn để xác định chính xác bạn bè được vote...")
+            poll_card = d(textContains="Bạn muốn Tẻn kiểm tra") or d(textContains="cuộc bình chọn")
+            if poll_card.exists:
+                poll_card.click()
+                time.sleep(2)
+                
+                # Đọc danh sách các tùy chọn trên màn hình Chi tiết bình chọn
+                options = d.xpath("//*[@resource-id='com.zing.zalo:id/tv_option']").all()
+                for opt in options:
+                    opt_text = opt.text or ""
+                    if d.xpath(f"//*[contains(@text, '{opt_text}')]/parent::*/parent::*//*[@resource-id='com.zing.zalo:id/avt1']").exists:
+                        for friend_key, info in STORY_FRIENDS.items():
+                            if friend_key in opt_text.lower() or info["name"].lower() in opt_text.lower():
+                                target_friend = friend_key
+                                print(f"🎯 [Poll Detail Scan] Phát hiện vote chuẩn xác cho: {info['name']}")
+                                break
+                    if target_friend:
+                        break
+        except Exception as e:
+            print(f"⚠️ Lỗi scan chi tiết bình chọn: {e}")
+
+    if not target_friend:
+        target_friend = "huy"
+
+    print(f"🎯 [Poll Listener] Xác nhận lượt chọn HỢP LỆ của {voter_name} cho bạn bè: {target_friend}")
     
-    # 1. Kiểm tra Story FB Lite & gửi ảnh vào Zalo
+    # 4. Kiểm tra Story FB Lite & gửi ảnh vào Zalo
     check_and_send_fb_story(d, target_friend)
 
-    # 2. Xóa Bảng Bình Chọn Zalo sau khi đã hoàn thành
-    delete_poll_zalo(d)
+    # 5. Khóa và dọn dẹp Bảng Bình Chọn Zalo
+    lock_and_cleanup_poll_zalo(d)
     
     active_poll_initiator = "" # Reset người tạo lệnh
     return True
