@@ -51,7 +51,7 @@ def normalize_video_url(url):
     return url_str
 
 def download_video_web(target_url, output_dir):
-    """Tải video đa nền tảng bằng yt-dlp trực tiếp."""
+    """Tải video đa nền tảng bằng yt-dlp trực tiếp mà không bắt buộc ffmpeg."""
     target_url = normalize_video_url(target_url)
     try:
         import yt_dlp
@@ -101,13 +101,15 @@ def start_zalo_and_open_chat(d, group_name):
         return True
 
     # 2. Thử click trực tiếp vào nhóm nếu đã hiển thị ngay màn hình danh sách tin nhắn
-    group_item = d(text=group_name)
+    group_item = d.xpath(f"//*[contains(@text, '{group_name}')]")
     if group_item.exists and not d(resourceId="com.zing.zalo:id/search_src_text").exists:
-        group_item.click()
-        time.sleep(2)
-        if is_in_chat_room(d):
-            print(f"✅ Đã chọn phòng chat từ danh sách: '{group_name}'")
-            return True
+        matches = group_item.all()
+        if matches:
+            matches[0].click()
+            time.sleep(2)
+            if is_in_chat_room(d):
+                print(f"✅ Đã chọn phòng chat từ danh sách: '{group_name}'")
+                return True
 
     # 3. Tìm ô Tìm kiếm trên giao diện Zalo Android
     print(f"🔍 Đang tìm kiếm nhóm chat: '{group_name}'...")
@@ -215,10 +217,10 @@ def send_zalo_message(d, text_msg):
 
 def send_zalo_video_android(d, video_path):
     """
-    Gửi Video MXH trực tiếp vào nhóm chat Zalo Android qua LDPlayer:
+    Gửi Video MXH trực tiếp vào nhóm chat Zalo Android qua LDPlayer (Cấu hình từ XML Dump):
     1. Push file .mp4 từ máy tính vào thẻ nhớ Android (/sdcard/DCIM/Camera/temp_bot_video.mp4).
     2. Gọi MediaScanner để Zalo Android cập nhật video mới vào Thư viện.
-    3. Mở Bộ chọn Thư viện của Zalo, chọn video mới nhất và bấm Gửi HD.
+    3. Mở Bộ chọn Thư viện Zalo, chọn video mới nhất (Bounds [301,1160][599,1458]) và bấm Gửi HD.
     """
     try:
         abs_path = os.path.abspath(video_path)
@@ -244,38 +246,23 @@ def send_zalo_video_android(d, video_path):
         d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
         time.sleep(1.5)
 
-        # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo (Dựa trên XML Dump chuẩn)
+        # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo
         print("🖼️ Đang mở Thư viện media Zalo...")
-        photo_btn = (
-            d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery") or 
-            d(description="Mở nơi gửi hình ảnh") or
-            d(resourceId="com.zing.zalo:id/btn_photo")
-        )
+        photo_btn = d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery")
         if photo_btn.exists:
             photo_btn.click()
             time.sleep(2)
         else:
-            # Fallback nhấp tọa độ icon Thư viện ảnh ở thanh dưới bên phải ô nhập tin nhắn
-            d.click(850, 1550)
+            d.click(850, 1110)
             time.sleep(2)
 
-        # Bật chế độ HD nếu có
-        hd_option = d(resourceId="com.zing.zalo:id/btn_hd") or d(text="HD")
-        if hd_option.exists:
-            try:
-                hd_option.click()
-                time.sleep(0.5)
-            except Exception:
-                pass
-
-        # Chọn video đầu tiên trong thư viện (Bỏ qua ô Chụp ảnh ở phía bên trái)
+        # Chọn video đầu tiên (Ô thứ 2 bên cạnh ô Chụp ảnh - Tọa độ chuẩn từ XML Dump [301,1160][599,1458])
         print("🎬 Đang chọn video mới nhất...")
         video_item = None
         video_selectors = [
-            d.xpath("//android.widget.TextView[contains(@text, ':')]"),
-            d(resourceId="com.zing.zalo:id/iv_thumb"),
-            d(resourceId="com.zing.zalo:id/v_photo_picker"),
-            d(resourceId="com.zing.zalo:id/grid_item_photo")
+            d.xpath("//*[contains(@text, ':')]"),
+            d.xpath("//*[@resource-id='com.zing.zalo:id/media_picker_layout']//android.widget.FrameLayout[2]"),
+            d(resourceId="com.zing.zalo:id/iv_thumb")
         ]
         for v_sel in video_selectors:
             if v_sel.exists:
@@ -286,9 +273,18 @@ def send_zalo_video_android(d, video_path):
             video_item.click()
             time.sleep(1)
         else:
-            # Click tọa độ ô video thứ nhất ở giữa bên phải (X=500, Y=820), tránh ô Chụp ảnh bên trái (X=200)
-            d.click(500, 820)
+            # Click tâm ô Video thứ 2 (X=450, Y=1309)
+            d.click(450, 1309)
             time.sleep(1)
+
+        # Bật chế độ HD nếu có
+        hd_option = d(resourceId="com.zing.zalo:id/btn_hd") or d(text="HD")
+        if hd_option.exists:
+            try:
+                hd_option.click()
+                time.sleep(0.5)
+            except Exception:
+                pass
 
         # Nhấp nút Gửi
         send_btn = None
@@ -296,7 +292,6 @@ def send_zalo_video_android(d, video_path):
             d(resourceId="com.zing.zalo:id/btn_send"),
             d(resourceId="com.zing.zalo:id/chat_btn_send"),
             d(resourceId="com.zing.zalo:id/btn_chat_send"),
-            d(resourceId="com.zing.zalo:id/stk_btn_send"),
             d(text="Gửi"),
             d(textContains="Gửi"),
             d(description="Gửi")
@@ -410,7 +405,7 @@ def main():
                                 except Exception:
                                     pass
                             else:
-                                send_zalo_message(d, "❌ Không thể tải video từ liên kết này!")
+                                send_zalo_message(d, "❌ Không thể tải video từ liên kết me này!")
 
                 time.sleep(1)
         except KeyboardInterrupt:
