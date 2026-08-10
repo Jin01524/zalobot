@@ -58,8 +58,7 @@ def download_video_web(target_url, output_dir):
         unique_id = str(uuid.uuid4())[:8]
         out_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
         ydl_opts = {
-            'format': 'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'merge_output_format': 'mp4',
+            'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
             'outtmpl': out_template,
             'quiet': True,
             'no_warnings': True,
