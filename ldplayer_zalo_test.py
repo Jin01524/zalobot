@@ -268,33 +268,52 @@ def send_zalo_video_android(d, video_path):
             except Exception:
                 pass
 
-        # Chọn video đầu tiên trong thư viện (Mới nhất ở góc trên bên trái)
+        # Chọn video đầu tiên trong thư viện (Bỏ qua ô Chụp ảnh ở phía bên trái)
         print("🎬 Đang chọn video mới nhất...")
-        grid_items = (
-            d(resourceId="com.zing.zalo:id/grid_item_photo") or 
-            d(resourceId="com.zing.zalo:id/iv_thumb") or 
-            d(resourceId="com.zing.zalo:id/v_photo_picker") or
-            d.xpath("//android.widget.GridView/*[1]")
-        )
-        if grid_items.exists:
-            grid_items.click()
+        video_item = None
+        video_selectors = [
+            d.xpath("//android.widget.TextView[contains(@text, ':')]"),
+            d(resourceId="com.zing.zalo:id/iv_thumb"),
+            d(resourceId="com.zing.zalo:id/v_photo_picker"),
+            d(resourceId="com.zing.zalo:id/grid_item_photo")
+        ]
+        for v_sel in video_selectors:
+            if v_sel.exists:
+                video_item = v_sel
+                break
+
+        if video_item:
+            video_item.click()
             time.sleep(1)
         else:
-            # Click ô đầu tiên trong grid chọn media
-            d.click(120, 950)
+            # Click tọa độ ô video thứ nhất ở giữa bên phải (X=500, Y=820), tránh ô Chụp ảnh bên trái (X=200)
+            d.click(500, 820)
             time.sleep(1)
 
         # Nhấp nút Gửi
-        send_btn = (
-            d(resourceId="com.zing.zalo:id/btn_send") or 
-            d(resourceId="com.zing.zalo:id/chat_btn_send") or 
-            d(text="Gửi") or
-            d(textContains="Gửi")
-        )
-        if send_btn.exists:
+        send_btn = None
+        send_selectors = [
+            d(resourceId="com.zing.zalo:id/btn_send"),
+            d(resourceId="com.zing.zalo:id/chat_btn_send"),
+            d(resourceId="com.zing.zalo:id/btn_chat_send"),
+            d(resourceId="com.zing.zalo:id/stk_btn_send"),
+            d(text="Gửi"),
+            d(textContains="Gửi"),
+            d(description="Gửi")
+        ]
+        for s_btn in send_selectors:
+            if s_btn.exists:
+                send_btn = s_btn
+                break
+
+        if send_btn:
             send_btn.click()
-            print("🚀 Đã phát video thành công vào nhóm Zalo Android!")
-            time.sleep(3)
+        else:
+            # Click góc dưới bên phải nút Gửi (X=820, Y=1550)
+            d.click(820, 1550)
+
+        print("🚀 Đã phát video thành công vào nhóm Zalo Android!")
+        time.sleep(3)
 
         # Xóa file tạm trên Android sdcard
         d.shell(f"rm -f {remote_android_path}")
