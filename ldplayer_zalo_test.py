@@ -116,25 +116,43 @@ def start_zalo_and_open_chat(d, group_name):
 def send_zalo_message(d, text_msg):
     """Gửi tin nhắn văn bản (CHỈ GỬI KHI ĐÃ Ở TRONG PHÒNG CHAT)."""
     try:
-        # 🧠 Bắt buộc lấy ô chat input trong phòng chat (resourceId chứa chat_input/input_chat)
-        input_box = d(resourceId="com.zing.zalo:id/chat_input_text") or d(resourceId="com.zing.zalo:id/input_chat")
-        
-        # Nếu chưa tìm thấy resourceId chuẩn nhưng xác nhận đã ở trong phòng chat
-        if not input_box.exists and is_in_chat_room(d):
-            input_box = d(className="android.widget.EditText")
+        input_box = None
+        # Kiểm tra lần lượt các selector ô nhập tin nhắn Zalo Android
+        selectors = [
+            d(resourceId="com.zing.zalo:id/chat_input_text"),
+            d(resourceId="com.zing.zalo:id/input_chat"),
+            d(resourceId="com.zing.zalo:id/input_chat_text"),
+            d(hint="Tin nhắn"),
+            d(className="android.widget.EditText")
+        ]
+        for sel in selectors:
+            if sel.exists:
+                input_box = sel
+                break
 
-        if input_box.exists:
+        if input_box:
             input_box.set_text(text_msg)
             time.sleep(0.5)
-            send_btn = (
-                d(resourceId="com.zing.zalo:id/btn_send") or 
-                d(resourceId="com.zing.zalo:id/chat_btn_send") or 
+            
+            send_btn = None
+            send_selectors = [
+                d(resourceId="com.zing.zalo:id/btn_send"),
+                d(resourceId="com.zing.zalo:id/chat_btn_send"),
+                d(resourceId="com.zing.zalo:id/btn_chat_send"),
                 d(description="Gửi")
-            )
-            if send_btn.exists:
+            ]
+            for s_btn in send_selectors:
+                if s_btn.exists:
+                    send_btn = s_btn
+                    break
+
+            if send_btn:
                 send_btn.click()
-                print(f"📤 Đã gửi tin nhắn: {text_msg}")
-                return True
+            else:
+                d.press("enter")
+
+            print(f"📤 Đã gửi tin nhắn: {text_msg}")
+            return True
         else:
             print("⚠️ Không tìm thấy ô nhập tin nhắn trong phòng chat!")
     except Exception as e:
@@ -144,10 +162,18 @@ def send_zalo_message(d, text_msg):
 def get_latest_chat_message(d):
     """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat."""
     try:
-        messages = d(resourceId="com.zing.zalo:id/chat_message_text")
-        if messages.exists and len(messages) > 0:
-            latest_text = messages[-1].get_text()
-            return latest_text
+        msg_selectors = [
+            d(resourceId="com.zing.zalo:id/tv_message"),
+            d(resourceId="com.zing.zalo:id/chat_message_text"),
+            d(resourceId="com.zing.zalo:id/message_text"),
+            d(resourceId="com.zing.zalo:id/cell_title_tv")
+        ]
+        for sel in msg_selectors:
+            if sel.exists:
+                # Đọc text từ element tin nhắn cuối cùng
+                messages = [el for el in sel if el.get_text()]
+                if messages:
+                    return messages[-1].get_text()
     except Exception:
         pass
     return None
