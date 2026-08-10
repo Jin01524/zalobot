@@ -8,6 +8,7 @@ import threading
 import queue
 import traceback
 import base64
+import re
 import concurrent.futures
 from collections import OrderedDict
 from bs4 import BeautifulSoup 
