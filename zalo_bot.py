@@ -2893,15 +2893,39 @@ def gui_anh_zalo(driver, image_data, caption=""):
 
 def download_video_web(target_url, output_dir):
     """
-    Tải video dựa vào liên kết người dùng gửi bằng cách truy cập các trang web hỗ trợ tương ứng:
-    - FB: https://fsave.net/vi
-    - X (Twitter): https://www.xsaver.io/x-downloader/vi/
-    - Instagram: https://savevid.to/vi
-    - YouTube: https://ytsave.to/vi2/
+    Tải video đa nền tảng (Facebook, YouTube, TikTok, Instagram, Twitter/X...):
+    1. Ưu tiên sử dụng thư viện yt-dlp trực tiếp (tốc độ cao, không phụ thuộc trình duyệt web cào).
+    2. Nếu yt-dlp gặp lỗi, fallback sang Selenium cào link từ trang web hỗ trợ (fsave, xsaver, savevid, ytsave).
     """
+    # ─── CÁCH 1: DÙNG YT-DLP TRỰC TIẾP ───────────────────────────────────────
+    try:
+        import yt_dlp
+        unique_id = str(uuid.uuid4())[:8]
+        out_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': out_template,
+            'quiet': True,
+            'no_warnings': True,
+            'max_filesize': 100 * 1024 * 1024, # 100MB
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(target_url, download=True)
+            filename = ydl.prepare_filename(info)
+            if os.path.exists(filename) and os.path.getsize(filename) > 50000:
+                with open(filename, "rb") as check_f:
+                    header = check_f.read(500)
+                if b"<!DOCTYPE" not in header and b"<html" not in header and b"<!doctype" not in header:
+                    print(f"✅ [yt-dlp] Tải video thành công: {filename}")
+                    return filename
+    except Exception as e:
+        print(f"⚠️ [yt-dlp] Lỗi tải video qua yt-dlp: {e}. Đang thử fallback qua Selenium web scraper...")
+
+    # ─── CÁCH 2: FALLBACK CÀO LINK QUA SELENIUM ──────────────────────────────
     url_lower = target_url.lower()
     site_url = None
-    if "facebook.com" in url_lower or "fb.watch" in url_lower:
+    if "facebook.com" in url_lower or "fb.watch" in url_lower or "fb.gg" in url_lower:
         site_url = "https://fsave.net/vi"
     elif "x.com" in url_lower or "twitter.com" in url_lower:
         site_url = "https://www.xsaver.io/x-downloader/vi/"
@@ -2930,11 +2954,14 @@ def download_video_web(target_url, output_dir):
             helper_driver = webdriver.Chrome(options=options)
 
         helper_driver.set_window_size(1280, 850)
+        helper_driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        })
         helper_driver.get(site_url)
         time.sleep(2)
 
         # 1. Tìm ô nhập link
-        inputs = helper_driver.find_elements(By.CSS_SELECTOR, "input[name='url'], input[type='text'], input[type='url'], #k_url, #url")
+        inputs = helper_driver.find_elements(By.CSS_SELECTOR, "input#postUrl, input[name='url'], input[type='text'], input[type='url'], #k_url, #url")
         if not inputs:
             helper_driver.quit()
             return None
@@ -2945,14 +2972,14 @@ def download_video_web(target_url, output_dir):
         time.sleep(0.5)
 
         # 2. Bấm nút Submit / Tải xuống
-        submit_btns = helper_driver.find_elements(By.CSS_SELECTOR, "button[type='submit'], input[type='submit'], #k_btn, .btn-search, button.btn")
+        submit_btns = helper_driver.find_elements(By.CSS_SELECTOR, "#loadVideos, button[type='submit'], input[type='submit'], #k_btn, .btn-search, button.btn")
         if submit_btns:
             submit_btns[0].click()
         else:
             input_field.send_keys(Keys.ENTER)
 
         # 3. Chờ kết quả tải xuất hiện
-        time.sleep(5)
+        time.sleep(6)
 
         # Tìm các link/nút tải file
         direct_url = None

@@ -4,5 +4,7 @@ pillow
 requests
 beautifulsoup4
 lunarcalendar
+yt-dlp
+
 
 
