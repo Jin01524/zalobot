@@ -18,19 +18,34 @@ def init_ldplayer():
         print("💡 Gợi ý: Hãy kiểm tra xem LDPlayer đã bật tính năng ADB Debugging chưa.")
         return None
 
+def is_in_chat_room(d):
+    """Kiểm tra xem hiện tại có phải đang ở trong màn hình phòng chat hay không."""
+    return (
+        d(resourceId="com.zing.zalo:id/chat_input_text").exists or 
+        d(resourceId="com.zing.zalo:id/input_chat").exists or 
+        d(resourceId="com.zing.zalo:id/chat_btn_send").exists
+    )
+
 def start_zalo_and_open_chat(d, group_name):
     print("🚀 Đang khởi động ứng dụng Zalo...")
     d.app_start(ZALO_PACKAGE)
     time.sleep(4)  # Chờ 4s cho Zalo Android mở hẳn
 
-    # 1. Thử click trực tiếp vào nhóm nếu đã hiển thị ngay màn hình tin nhắn
-    if d(text=group_name).exists:
-        d(text=group_name).click()
-        print(f"✅ Đã chọn phòng chat: '{group_name}'")
-        time.sleep(2)
+    # 1. Nếu đã ở trong phòng chat sẵn
+    if is_in_chat_room(d):
+        print(f"✅ Đã ở trong phòng chat sẵn.")
         return True
 
-    # 2. Tìm ô Tìm kiếm trên giao diện Zalo Android
+    # 2. Thử click trực tiếp vào nhóm nếu đã hiển thị ngay màn hình danh sách tin nhắn
+    group_item = d(text=group_name)
+    if group_item.exists and not d(resourceId="com.zing.zalo:id/search_src_text").exists:
+        group_item.click()
+        time.sleep(2)
+        if is_in_chat_room(d):
+            print(f"✅ Đã chọn phòng chat từ danh sách: '{group_name}'")
+            return True
+
+    # 3. Tìm ô Tìm kiếm trên giao diện Zalo Android
     print(f"🔍 Đang tìm kiếm nhóm chat: '{group_name}'...")
     search_bar = None
     search_selectors = [
@@ -41,8 +56,7 @@ def start_zalo_and_open_chat(d, group_name):
         d(resourceId="com.zing.zalo:id/main_tab_search"),
         d(text="Tìm kiếm"),
         d(textContains="Tìm kiếm"),
-        d(description="Tìm kiếm"),
-        d(className="android.widget.EditText")
+        d(description="Tìm kiếm")
     ]
     for s in search_selectors:
         if s.exists:
@@ -54,7 +68,7 @@ def start_zalo_and_open_chat(d, group_name):
             search_bar.click()
             time.sleep(1.5)
             
-            # Nhập tên nhóm vào ô EditText
+            # Nhập tên nhóm vào ô EditText của Tìm kiếm
             search_input = (
                 d(resourceId="com.zing.zalo:id/search_src_text") or 
                 d(resourceId="com.zing.zalo:id/input_search") or
@@ -62,15 +76,21 @@ def start_zalo_and_open_chat(d, group_name):
             )
             if search_input.exists:
                 search_input.set_text(group_name)
-                time.sleep(2)
+                time.sleep(2.5)
                 
-                # Tìm và click tên nhóm trong danh sách kết quả
-                target_result = d(text=group_name) or d(textContains=group_name)
-                if target_result.exists:
-                    target_result.click()
-                    print(f"✅ Đã vào phòng chat: '{group_name}'")
-                    time.sleep(2)
-                    return True
+                # Tìm và click dòng kết quả tìm kiếm (Bỏ qua ô EditText tìm kiếm)
+                results = d(text=group_name) or d(textContains=group_name)
+                if results.exists:
+                    for i in range(len(results)):
+                        item = results[i]
+                        # Bỏ qua ô nhập tìm kiếm
+                        if item.info.get("className") != "android.widget.EditText":
+                            item.click()
+                            time.sleep(2.5)
+                            if is_in_chat_room(d):
+                                print(f"✅ Đã mở phòng chat thành công: '{group_name}'")
+                                return True
+                            break
         except Exception as e:
             print(f"⚠️ Lỗi trong quá trình tìm kiếm: {e}")
 
@@ -82,21 +102,33 @@ def start_zalo_and_open_chat(d, group_name):
     except Exception:
         pass
 
-    print(f"❌ Không tìm thấy phòng chat: '{group_name}'")
+    print(f"❌ Không mở được phòng chat: '{group_name}'")
     return False
 
 def send_zalo_message(d, text_msg):
-    """Gửi tin nhắn văn bản vào cuộc trò chuyện đang mở."""
+    """Gửi tin nhắn văn bản (CHỈ GỬI KHI ĐÃ Ở TRONG PHÒNG CHAT)."""
     try:
-        input_box = d(resourceId="com.zing.zalo:id/chat_input_text") or d(className="android.widget.EditText")
+        # 🧠 Bắt buộc lấy ô chat input trong phòng chat (resourceId chứa chat_input/input_chat)
+        input_box = d(resourceId="com.zing.zalo:id/chat_input_text") or d(resourceId="com.zing.zalo:id/input_chat")
+        
+        # Nếu chưa tìm thấy resourceId chuẩn nhưng xác nhận đã ở trong phòng chat
+        if not input_box.exists and is_in_chat_room(d):
+            input_box = d(className="android.widget.EditText")
+
         if input_box.exists:
             input_box.set_text(text_msg)
             time.sleep(0.5)
-            send_btn = d(resourceId="com.zing.zalo:id/btn_send") or d(description="Gửi")
+            send_btn = (
+                d(resourceId="com.zing.zalo:id/btn_send") or 
+                d(resourceId="com.zing.zalo:id/chat_btn_send") or 
+                d(description="Gửi")
+            )
             if send_btn.exists:
                 send_btn.click()
                 print(f"📤 Đã gửi tin nhắn: {text_msg}")
                 return True
+        else:
+            print("⚠️ Không tìm thấy ô nhập tin nhắn trong phòng chat!")
     except Exception as e:
         print(f"⚠️ Lỗi gửi tin nhắn: {e}")
     return False
