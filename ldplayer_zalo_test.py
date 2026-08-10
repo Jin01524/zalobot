@@ -430,47 +430,19 @@ def extract_latest_chat_record(d):
         print(f"⚠️ Lỗi đọc chat record: {e}")
     return None
 
-def check_poll_vote_and_trigger(d, msg_text):
-    """
-    Tự động xử lý khi nhận được thông báo lượt bình chọn từ nhóm Zalo:
-    Ví dụ: 'Võ Ngọc Bình tham gia cuộc bình chọn...' hoặc 'bình chọn cho: Tâm'
-    """
-    msg_clean = msg_text.lower()
-    print(f"📊 [Poll Listener] Đang xử lý sự kiện bình chọn: '{msg_text}'")
-    
-    # 1. Thử tìm tên bạn bè trực tiếp trong nội dung thông báo
-    for friend_key, info in STORY_FRIENDS.items():
-        if friend_key in msg_clean or info["name"].lower() in msg_clean:
-            print(f"🎯 [Poll Listener] Phát hiện lượt chọn cho bạn bè: {info['name']}")
-            check_and_send_fb_story(d, friend_key)
-            return True
+active_poll_initiator = ""
 
-    # 2. Nếu không phân tích được tên cụ thể từ câu ngắn, kiểm tra Story bạn bè được mở gần nhất (mặc định Tâm)
-    check_and_send_fb_story(d, "tâm")
-    return True
-
-def exit_to_android_home(d):
-    """Tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite...) và quay về màn hình chính Android LDPlayer."""
-    print("\n🧹 Đang dọn dẹp và tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite)...")
-    try:
-        if d:
-            d.app_stop(ZALO_PACKAGE)
-            d.app_stop("com.facebook.lite")
-            d.shell(f"am force-stop {ZALO_PACKAGE}")
-            d.shell("am force-stop com.facebook.lite")
-            time.sleep(0.5)
-            d.press("home")
-            time.sleep(1)
-    except Exception as e:
-        print(f"⚠️ Lỗi tắt ứng dụng ngầm: {e}")
-    print("🛑 Bot đã tắt sạch ứng dụng ngầm và quay về màn hình chính an toàn!")
-
-def create_story_poll_zalo(d):
+def create_story_poll_zalo(d, initiator_name=""):
     """
     Tự động tạo Bảng Bình Chọn Story FB trong nhóm Zalo khi gõ lệnh /storyfb:
-    - Câu hỏi: 📊 Bạn muốn Tẻn kiểm tra Story Facebook của ai?
-    - 8 Phương án: Bình, Huy, Vit, Tâm, Nhung, Mai, Phương, Tuân
+    - Cấu hình: TẮT 'Chọn nhiều phương án' & TẮT 'Có thể thêm phương án'.
+    - Ghi nhớ người khởi tạo lệnh để phân quyền bình chọn.
     """
+    global active_poll_initiator
+    if initiator_name:
+        active_poll_initiator = initiator_name.strip()
+        print(f"👤 Ghi nhớ người khởi tạo lệnh /storyfb: '{active_poll_initiator}'")
+
     try:
         print("📊 Đang tiến hành tạo Bình chọn Story FB trong nhóm Zalo...")
         send_zalo_message(d, "📊 Tẻn đang tạo Bảng Bình Chọn danh sách bạn bè để sếp lựa chọn nhé...")
@@ -524,16 +496,128 @@ def create_story_poll_zalo(d):
                 opts_current[i].set_text(opt_name)
                 time.sleep(0.3)
 
-        # 4. Bấm nút TẠO
+        # 4. Tắt tùy chọn "Chọn nhiều phương án" & "Có thể thêm phương án"
+        multi_switch = d(resourceId="com.zing.zalo:id/setting_multi_choice_switch")
+        if multi_switch.exists and multi_switch.info.get("checked", False):
+            print("🔘 Đang TẮT 'Chọn nhiều phương án'...")
+            multi_switch.click()
+            time.sleep(0.3)
+
+        add_switch = d(resourceId="com.zing.zalo:id/setting_add_new_option_switch")
+        if add_switch.exists and add_switch.info.get("checked", False):
+            print("🔘 Đang TẮT 'Có thể thêm phương án'...")
+            add_switch.click()
+            time.sleep(0.3)
+
+        # 5. Bấm nút TẠO
         submit_btn = d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_1") or d(text="TẠO")
         if submit_btn.exists:
             submit_btn.click()
-            print("✅ Đã tạo thành công Bảng Bình Chọn Story FB trong nhóm Zalo!")
+            print("✅ Đã tạo thành công Bảng Bình Chọn Story FB duy nhất trong nhóm Zalo!")
             time.sleep(2)
             return True
     except Exception as e:
         print(f"❌ Lỗi tạo Bình chọn Zalo: {e}")
     return False
+
+def delete_poll_zalo(d):
+    """
+    Tự động xóa Bảng Bình Chọn trong nhóm Zalo sau khi đã phản hồi xong:
+    1. Click mở Bảng Bình Chọn từ phòng chat.
+    2. Click nút 3 chấm (...) góc trên bên phải -> chọn 'Xóa bình chọn'.
+    3. Xác nhận Xóa.
+    """
+    try:
+        print("🗑️ Đang tiến hành xóa Bảng Bình Chọn trong nhóm Zalo...")
+        
+        poll_card = (
+            d(textContains="Bạn muốn Tẻn kiểm tra") or 
+            d(textContains="bình chọn") or 
+            d(textContains="Xem cập nhật trước")
+        )
+        if poll_card.exists:
+            poll_card.click()
+            time.sleep(2)
+
+            more_btn = (
+                d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_1") or 
+                d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_2") or 
+                d(description="Xem thêm") or 
+                d(description="Tùy chọn")
+            )
+            if more_btn.exists:
+                more_btn.click()
+                time.sleep(1.5)
+
+                delete_item = d(text="Xóa bình chọn") or d(textContains="Xóa bình chọn") or d(resourceId="com.zing.zalo:id/tv_delete_poll")
+                if delete_item.exists:
+                    delete_item.click()
+                    time.sleep(1.5)
+
+                    confirm_btn = d(resourceId="android:id/button1") or d(text="Xóa") or d(textContains="Xóa")
+                    if confirm_btn.exists:
+                        confirm_btn.click()
+                        print("✅ Đã xóa Bảng Bình Chọn Zalo thành công!")
+                        time.sleep(2)
+                        return True
+            d.press("back")
+    except Exception as e:
+        print(f"⚠️ Lỗi xóa bình chọn Zalo: {e}")
+    return False
+
+def check_poll_vote_and_trigger(d, record):
+    """
+    Xử lý khi nhận được thông báo lượt bình chọn:
+    1. Đối chiếu xem người vừa bình chọn có phải người đã phát lệnh /storyfb hay không.
+    2. Nếu đúng: Phản hồi chụp Story FB Lite -> Gửi Zalo -> Xóa Bảng Bình Chọn.
+    3. Nếu không phải người phát lệnh: Bỏ qua và thông báo nhắc nhở.
+    """
+    global active_poll_initiator
+    voter_name = record.get("sender", "").strip()
+    msg_text = record.get("content", "").strip()
+    msg_clean = msg_text.lower()
+    
+    print(f"📊 [Poll Listener] Người bình chọn: '{voter_name}' | Người tạo lệnh: '{active_poll_initiator}' | Thông báo: '{msg_text}'")
+
+    # Kiểm tra quyền: Chỉ người gửi lệnh /storyfb mới được quyền chọn
+    if active_poll_initiator and voter_name and active_poll_initiator.lower() not in voter_name.lower() and voter_name.lower() not in active_poll_initiator.lower():
+        print(f"⚠️ '{voter_name}' không phải người dùng lệnh '{active_poll_initiator}' -> Từ chối phản hồi!")
+        send_zalo_message(d, f"⚠️ Chỉ có {active_poll_initiator} (người dùng lệnh /storyfb) mới có quyền chọn Story nhé!")
+        return False
+
+    # Đúng người tạo lệnh: tiến hành phản hồi
+    target_friend = "tâm"
+    for friend_key, info in STORY_FRIENDS.items():
+        if friend_key in msg_clean or info["name"].lower() in msg_clean:
+            target_friend = friend_key
+            break
+
+    print(f"🎯 [Poll Listener] Xác nhận lượt chọn hợp lệ của {voter_name} cho bạn bè: {target_friend}")
+    
+    # 1. Kiểm tra Story FB Lite & gửi ảnh vào Zalo
+    check_and_send_fb_story(d, target_friend)
+
+    # 2. Xóa Bảng Bình Chọn Zalo sau khi đã hoàn thành
+    delete_poll_zalo(d)
+    
+    active_poll_initiator = "" # Reset người tạo lệnh
+    return True
+
+def exit_to_android_home(d):
+    """Tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite...) và quay về màn hình chính Android LDPlayer."""
+    print("\n🧹 Đang dọn dẹp và tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite)...")
+    try:
+        if d:
+            d.app_stop(ZALO_PACKAGE)
+            d.app_stop("com.facebook.lite")
+            d.shell(f"am force-stop {ZALO_PACKAGE}")
+            d.shell("am force-stop com.facebook.lite")
+            time.sleep(0.5)
+            d.press("home")
+            time.sleep(1)
+    except Exception as e:
+        print(f"⚠️ Lỗi tắt ứng dụng ngầm: {e}")
+    print("🛑 Bot đã tắt sạch ứng dụng ngầm và quay về màn hình chính an toàn!")
 
 def check_and_send_fb_story(d, friend_keyword=None):
     """
@@ -652,23 +736,23 @@ def send_zalo_photo_android(d, photo_path):
         print(f"❌ Lỗi gửi ảnh Zalo: {e}")
         return False
 
-processed_messages = set()
+processed_records = set()
 
-def is_already_processed(msg):
-    """Kiểm tra xem tin nhắn/thông báo này đã được xử lý trước đó hay chưa."""
-    if not msg:
+def is_already_processed(record):
+    """Kiểm tra xem bộ (người gửi + thời gian + nội dung) này đã được xử lý trước đó hay chưa."""
+    if not record or not record.get("signature"):
         return True
-    clean_msg = msg.strip()
-    return clean_msg in processed_messages
+    return record["signature"] in processed_records
 
-def mark_as_processed(msg):
-    """Lưu vết tin nhắn đã xử lý để chống lặp lại hành động."""
-    if not msg:
+def mark_as_processed(record):
+    """Lưu vết bộ (người gửi + thời gian + nội dung) vào lịch sử để chống lặp lại hành động."""
+    if not record or not record.get("signature"):
         return
-    clean_msg = msg.strip()
-    processed_messages.add(clean_msg)
-    if len(processed_messages) > 100:
-        processed_messages.clear()
+    sig = record["signature"]
+    processed_records.add(sig)
+    print(f"📝 [Record Saved] Người gửi: '{record['sender']}' | Thời gian: '{record['timestamp']}' | Nội dung: '{record['content']}'")
+    if len(processed_records) > 100:
+        processed_records.clear()
 
 def main():
     d = init_ldplayer()
@@ -680,7 +764,6 @@ def main():
         send_zalo_message(d, "🤖 Tẻn Android Bot (LDPlayer) đã kết nối trực tiếp thành công!")
         
         print("👁️ Bắt đầu vòng lặp lắng nghe tin nhắn Zalo Android... (Gõ 'stop' + Enter hoặc Ctrl+C để quay về màn hình chính Android)")
-        last_text = ""
         cmd_buffer = ""
         try:
             while True:
@@ -706,11 +789,14 @@ def main():
                     time.sleep(2)
                     continue
 
-                msg_text = get_latest_chat_message(d)
-                if msg_text and msg_text != last_text and not is_already_processed(msg_text):
-                    last_text = msg_text
-                    mark_as_processed(msg_text)
-                    print(f"📩 [Scan Result] Đã phát hiện tin nhắn mới: '{msg_text}'")
+                record = extract_latest_chat_record(d)
+                if record and not is_already_processed(record):
+                    mark_as_processed(record)
+                    sender = record["sender"]
+                    msg_time = record["timestamp"]
+                    msg_text = record["content"]
+                    
+                    print(f"📩 [Scan Result] Người gửi: '{sender}' | Thời gian: '{msg_time}' | Nội dung: '{msg_text}'")
                     
                     if msg_text.startswith("/ping"):
                         send_zalo_message(d, "🏓 Pong! Bot LDPlayer đang phản hồi cực nhanh!")
@@ -722,10 +808,10 @@ def main():
                             target_name = parts[1].strip()
                             check_and_send_fb_story(d, target_name)
                         else:
-                            create_story_poll_zalo(d)
+                            create_story_poll_zalo(d, initiator_name=sender)
                     elif "cuộc bình chọn" in msg_text.lower() or "bình chọn" in msg_text.lower() or "tham gia" in msg_text.lower():
                         if "tạo cuộc bình chọn" not in msg_text.lower() and "đang tạo" not in msg_text.lower():
-                            check_poll_vote_and_trigger(d, msg_text)
+                            check_poll_vote_and_trigger(d, record)
                     elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
                         url_match = re.search(r'((?:https?://|www\.)[^\s]+)', msg_text)
                         if url_match:
