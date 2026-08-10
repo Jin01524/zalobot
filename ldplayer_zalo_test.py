@@ -12,6 +12,22 @@ ZALO_PACKAGE = "com.zing.zalo"
 TARGET_GROUP_NAME = "Nà ná na na"  # Tên nhóm chat mẫu
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Danh sách bạn bè kiểm tra Story FB theo yêu cầu
+STORY_FRIENDS = {
+    "bình": {"name": "Vo Bình", "url": "https://www.facebook.com/Jin01050", "status": "ok"},
+    "binh": {"name": "Vo Bình", "url": "https://www.facebook.com/Jin01050", "status": "ok"},
+    "huy": {"name": "Huy Nguyễn", "url": "https://www.facebook.com/huy.nguyen.562977", "status": "ok"},
+    "vit": {"name": "Pham Davit", "url": "https://www.facebook.com/pham.davit.37", "status": "ok"},
+    "tâm": {"name": "Nguyễn Trương Minh Tâm", "url": "https://www.facebook.com/nguyen.truong.minh.tam.2024", "status": "ok"},
+    "tam": {"name": "Nguyễn Trương Minh Tâm", "url": "https://www.facebook.com/nguyen.truong.minh.tam.2024", "status": "ok"},
+    "nhung": {"name": "Nhung Trần", "url": "https://www.facebook.com/nhung.tran.478695", "status": "ok"},
+    "mai": {"name": "Huỳnh Phương Mai", "url": "https://www.facebook.com/huynh.phuong.mai.41724", "status": "ok"},
+    "phương": {"name": "Quảng Thị Minh Phương", "url": "https://www.facebook.com/quang.thi.minh.phuong.2025", "status": "ok"},
+    "phuong": {"name": "Quảng Thị Minh Phương", "url": "https://www.facebook.com/quang.thi.minh.phuong.2025", "status": "ok"},
+    "tuân": {"name": "Tuân", "url": "", "status": "not_friend"},
+    "tuan": {"name": "Tuân", "url": "", "status": "not_friend"}
+}
+
 def init_ldplayer():
     print(f"🔌 Đang kết nối tới LDPlayer tại {LDPLAYER_ADB}...")
     try:
@@ -319,18 +335,17 @@ def send_zalo_video_android(d, video_path):
     return False
 
 def cleanup_temp_videos(d, local_video_path=None):
-    """Xóa sạch hoàn toàn các file video tạm cả trên máy tính (PC) lẫn bộ nhớ giả lập Android (LDPlayer)."""
-    # 1. Xóa file tạm trên PC
+    """Xóa sạch hoàn toàn các file video/ảnh tạm cả trên máy tính (PC) lẫn bộ nhớ giả lập Android (LDPlayer)."""
     if local_video_path and os.path.exists(local_video_path):
         try:
             os.remove(local_video_path)
-            print(f"🗑️ Đã xóa file video tạm trên PC: {os.path.basename(local_video_path)}")
+            print(f"🗑️ Đã xóa file tạm trên PC: {os.path.basename(local_video_path)}")
         except Exception:
             pass
 
     try:
         for f in os.listdir(BASE_DIR):
-            if f.startswith("temp_video_") and f.endswith(".mp4"):
+            if (f.startswith("temp_video_") or f.startswith("temp_story_")) and (f.endswith(".mp4") or f.endswith(".png")):
                 try:
                     os.remove(os.path.join(BASE_DIR, f))
                 except Exception:
@@ -338,11 +353,11 @@ def cleanup_temp_videos(d, local_video_path=None):
     except Exception:
         pass
 
-    # 2. Xóa sạch file tạm trong thẻ nhớ Android LDPlayer và phát broadcast cập nhật lại Thư viện Zalo
     try:
         remote_path = "/sdcard/DCIM/Camera/temp_bot_video.mp4"
         d.shell(f"rm -f {remote_path}")
         d.shell("rm -f /sdcard/DCIM/Camera/temp_bot_video*.mp4")
+        d.shell("rm -f /sdcard/DCIM/Camera/temp_story_screenshot*.png")
         d.shell("rm -f /sdcard/Download/temp_bot_video*.mp4")
         d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_path}")
         print("🧹 Đã dọn dẹp và làm sạch bộ nhớ Thư viện trên LDPlayer!")
@@ -377,7 +392,7 @@ def get_latest_chat_message(d):
                     if "Tẻn Android Bot" in full_text or "kết nối trực tiếp thành công" in full_text:
                         continue
                     
-                    # Ưu tiên lấy dòng chứa lệnh (/video, /v, /ping, /menu) hoặc chứa link (http, www)
+                    # Ưu tiên lấy dòng chứa lệnh (/video, /v, /storyfb, /story, /ping, /menu) hoặc chứa link (http, www)
                     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
                     for line in lines:
                         if line.startswith("/") or "http" in line or "www." in line or any(domain in line for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
@@ -396,38 +411,129 @@ def exit_to_android_home(d):
     print("\n🧹 Đang dọn dẹp và tắt sạch toàn bộ ứng dụng chạy ngầm (Zalo, Facebook Lite)...")
     try:
         if d:
-            # Force-stop tắt sạch tiến trình Zalo và Facebook Lite khỏi RAM chạy ngầm
             d.app_stop(ZALO_PACKAGE)
             d.app_stop("com.facebook.lite")
             d.shell(f"am force-stop {ZALO_PACKAGE}")
             d.shell("am force-stop com.facebook.lite")
             time.sleep(0.5)
-            # Quay về màn hình chính Android Launcher
             d.press("home")
             time.sleep(1)
     except Exception as e:
         print(f"⚠️ Lỗi tắt ứng dụng ngầm: {e}")
     print("🛑 Bot đã tắt sạch ứng dụng ngầm và quay về màn hình chính an toàn!")
 
-def check_and_send_fb_story(d):
+def create_story_poll_zalo(d):
     """
-    Tự động vào Facebook Lite (com.facebook.lite), kiểm tra Tin mới của bạn bè,
-    chụp ảnh màn hình Story và gửi ảnh chụp màn hình đó vào nhóm Zalo.
+    Tự động tạo Bảng Bình Chọn Story FB trong nhóm Zalo khi gõ lệnh /storyfb:
+    - Câu hỏi: 📊 Bạn muốn Tẻn kiểm tra Story Facebook của ai?
+    - 8 Phương án: Bình, Huy, Vit, Tâm, Nhung, Mai, Phương, Tuân
     """
     try:
-        print("🚀 Đang mở ứng dụng Facebook Lite...")
-        send_zalo_message(d, "🔎 Tẻn đang qua Facebook Lite kiểm tra Tin mới của bạn bè...")
+        print("📊 Đang tiến hành tạo Bình chọn Story FB trong nhóm Zalo...")
+        send_zalo_message(d, "📊 Tẻn đang tạo Bảng Bình Chọn danh sách bạn bè để sếp lựa chọn nhé...")
+        time.sleep(1)
+
+        # 1. Mở ô Đính kèm (com.zing.zalo:id/new_chat_input_btn_attach)
+        attach_btn = d(resourceId="com.zing.zalo:id/new_chat_input_btn_attach")
+        if attach_btn.exists:
+            attach_btn.click()
+            time.sleep(1.5)
+            
+        poll_option = d(resourceId="com.zing.zalo:id/cel_option_polls") or d(text="Bình chọn")
+        if poll_option.exists:
+            poll_option.click()
+            time.sleep(2)
+            
+        create_btn = d(resourceId="com.zing.zalo:id/btn_action") or d(text="TẠO BÌNH CHỌN")
+        if create_btn.exists:
+            create_btn.click()
+            time.sleep(2)
+
+        # 2. Nhập câu hỏi bình chọn
+        question_input = d(resourceId="com.zing.zalo:id/et_group_poll_question")
+        if question_input.exists:
+            question_input.set_text("📊 Bạn muốn Tẻn kiểm tra Story Facebook của ai?")
+            time.sleep(0.5)
+
+        poll_names = [
+            "Bình (Vo Bình)",
+            "Huy (Huy Nguyễn)",
+            "Vit (Pham Davit)",
+            "Tâm (Nguyễn Trương Minh Tâm)",
+            "Nhung (Nhung Trần)",
+            "Mai (Huỳnh Phương Mai)",
+            "Phương (Quảng Thị Minh Phương)",
+            "Tuân"
+        ]
+
+        # 3. Điền các phương án
+        for i, opt_name in enumerate(poll_names):
+            while len(d(resourceId="com.zing.zalo:id/et_group_poll_option")) <= i:
+                add_btn = d(resourceId="com.zing.zalo:id/btn_add_option") or d(text="Thêm phương án")
+                if add_btn.exists:
+                    add_btn.click()
+                    time.sleep(0.5)
+                else:
+                    break
+                    
+            opts_current = d(resourceId="com.zing.zalo:id/et_group_poll_option")
+            if i < len(opts_current):
+                opts_current[i].set_text(opt_name)
+                time.sleep(0.3)
+
+        # 4. Bấm nút TẠO
+        submit_btn = d(resourceId="com.zing.zalo:id/actionbar_btn_trailing_1") or d(text="TẠO")
+        if submit_btn.exists:
+            submit_btn.click()
+            print("✅ Đã tạo thành công Bảng Bình Chọn Story FB trong nhóm Zalo!")
+            time.sleep(2)
+            return True
+    except Exception as e:
+        print(f"❌ Lỗi tạo Bình chọn Zalo: {e}")
+    return False
+
+def check_and_send_fb_story(d, friend_keyword=None):
+    """
+    Tự động vào Facebook Lite (com.facebook.lite), kiểm tra Tin mới của bạn bè cụ thể:
+    - Nếu là 'Tuân': Thông báo '⚠️ Tuân chưa đồng ý kết bạn với Tẻn nên chưa thể xem Story nhé!'
+    - Các bạn bè khác: Mở FB Lite, xem Story, chụp ảnh màn hình và gửi vào Zalo.
+    """
+    if friend_keyword:
+        key_clean = friend_keyword.strip().lower()
+        if "tuân" in key_clean or "tuan" in key_clean:
+            send_zalo_message(d, "⚠️ Tuân chưa đồng ý kết bạn với Tẻn nên chưa thể xem Story nhé!")
+            return True
+
+    # Tra cứu thông tin tên bạn bè
+    target_info = None
+    if friend_keyword:
+        kw = friend_keyword.strip().lower()
+        for k, info in STORY_FRIENDS.items():
+            if k in kw or info["name"].lower() in kw:
+                target_info = info
+                break
+
+    friend_disp_name = target_info["name"] if target_info else "bạn bè"
+    print(f"🚀 Đang mở ứng dụng Facebook Lite để kiểm tra Story của: {friend_disp_name}...")
+    send_zalo_message(d, f"🔎 Tẻn đang qua Facebook Lite kiểm tra Story của {friend_disp_name}...")
+
+    try:
         d.app_start("com.facebook.lite")
         time.sleep(4)
 
-        # Mở Tin mới của bạn bè (Tìm biểu tượng số 1 hoặc nhấp ô Story thứ 2 tại X=450, Y=640)
-        print("👉 Đang mở Tin mới của bạn bè...")
-        story_badge = d(text="1")
-        if story_badge.exists:
-            story_badge.click()
-        else:
+        # Mở Tin mới của bạn bè
+        opened_story = False
+        if target_info and target_info["name"]:
+            name_item = d(textContains=target_info["name"])
+            if name_item.exists:
+                name_item.click()
+                opened_story = True
+                time.sleep(3)
+
+        if not opened_story:
+            # Click ô Story thứ 2 tại X=450, Y=640
             d.click(450, 640)
-        time.sleep(3)
+            time.sleep(3)
 
         # Xử lý popup OK của Facebook Lite nếu lần đầu mở Tin
         if d(text="OK").exists:
@@ -547,9 +653,14 @@ def main():
                     if msg_text.startswith("/ping"):
                         send_zalo_message(d, "🏓 Pong! Bot LDPlayer đang phản hồi cực nhanh!")
                     elif msg_text.startswith("/menu"):
-                        send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- /fb hoặc /story (Chụp Story FB Lite gửi Zalo)\n- Gõ 'stop' ở CMD để về Home")
-                    elif msg_text.startswith("/fb") or msg_text.startswith("/story") or msg_text.startswith("/tin") or msg_text.startswith("/checkfb"):
-                        check_and_send_fb_story(d)
+                        send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- /storyfb (Tạo Bảng Bình Chọn xem Story FB)\n- /storyfb [tên] (Ví dụ: /storyfb tâm, /storyfb tuân)\n- Gõ 'stop' ở CMD để tắt ứng dụng ngầm & về Home")
+                    elif msg_text.startswith("/storyfb") or msg_text.startswith("/story"):
+                        parts = msg_text.strip().split(maxsplit=1)
+                        if len(parts) > 1:
+                            target_name = parts[1].strip()
+                            check_and_send_fb_story(d, target_name)
+                        else:
+                            create_story_poll_zalo(d)
                     elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
                         url_match = re.search(r'((?:https?://|www\.)[^\s]+)', msg_text)
                         if url_match:
