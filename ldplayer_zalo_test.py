@@ -310,12 +310,43 @@ def send_zalo_video_android(d, video_path):
         print("🚀 Đã phát video thành công vào nhóm Zalo Android!")
         time.sleep(3)
 
-        # Xóa file tạm trên Android sdcard
-        d.shell(f"rm -f {remote_android_path}")
+        # Xóa và làm sạch file tạm trên cả Android LDPlayer lẫn máy tính (PC)
+        cleanup_temp_videos(d, abs_path)
         return True
     except Exception as e:
         print(f"❌ Lỗi gửi video Android: {e}")
-        return False
+    return False
+
+def cleanup_temp_videos(d, local_video_path=None):
+    """Xóa sạch hoàn toàn các file video tạm cả trên máy tính (PC) lẫn bộ nhớ giả lập Android (LDPlayer)."""
+    # 1. Xóa file tạm trên PC
+    if local_video_path and os.path.exists(local_video_path):
+        try:
+            os.remove(local_video_path)
+            print(f"🗑️ Đã xóa file video tạm trên PC: {os.path.basename(local_video_path)}")
+        except Exception:
+            pass
+
+    try:
+        for f in os.listdir(BASE_DIR):
+            if f.startswith("temp_video_") and f.endswith(".mp4"):
+                try:
+                    os.remove(os.path.join(BASE_DIR, f))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2. Xóa sạch file tạm trong thẻ nhớ Android LDPlayer và phát broadcast cập nhật lại Thư viện Zalo
+    try:
+        remote_path = "/sdcard/DCIM/Camera/temp_bot_video.mp4"
+        d.shell(f"rm -f {remote_path}")
+        d.shell("rm -f /sdcard/DCIM/Camera/temp_bot_video*.mp4")
+        d.shell("rm -f /sdcard/Download/temp_bot_video*.mp4")
+        d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_path}")
+        print("🧹 Đã dọn dẹp và làm sạch bộ nhớ Thư viện trên LDPlayer!")
+    except Exception as e:
+        print(f"⚠️ Lỗi dọn dẹp Android: {e}")
 
 def is_timestamp_or_status(s):
     """Kiểm tra xem chuỗi có phải là mốc thời gian (vd: 22:33, 07:15), tên nhóm header hoặc trạng thái giao diện không."""
@@ -399,13 +430,9 @@ def main():
                             v_file = download_video_web(target_url, BASE_DIR)
                             if v_file:
                                 send_zalo_video_android(d, v_file)
-                                try:
-                                    if os.path.exists(v_file):
-                                        os.remove(v_file)
-                                except Exception:
-                                    pass
+                                cleanup_temp_videos(d, v_file)
                             else:
-                                send_zalo_message(d, "❌ Không thể tải video từ liên kết me này!")
+                                send_zalo_message(d, "❌ Không thể tải video từ liên kết này!")
 
                 time.sleep(1)
         except KeyboardInterrupt:
