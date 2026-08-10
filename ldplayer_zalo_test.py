@@ -25,17 +25,24 @@ def init_ldplayer():
 def normalize_video_url(url):
     """
     Chuẩn hóa URL Facebook/TikTok/YouTube trước khi đưa vào downloader.
-    Tự động trích xuất ID số (10-20 chữ số) từ link share/watch/reel/fb.watch để tránh lỗi yt-dlp.
+    Tự động trích xuất ID số chuẩn của FB Reel/Watch/Video (ví dụ: 1498614348705271) ngay cả khi bị dính chuỗi lượt xem '49K'.
     """
     url_str = str(url).strip().strip("<>").strip()
     if any(domain in url_str.lower() for domain in ["facebook.com", "fb.watch", "fb.gg"]):
-        match = re.search(r'(\d{10,20})', url_str)
+        # 1. Thử trích xuất theo đường dẫn dạng facebook.com/reel/1498614348705271 hoặc watch/?v=1498614348705271
+        match = re.search(r'facebook\.com/(?:reel|watch|videos|share/[rv])/(\d{10,16})', url_str)
         if match:
             return f"https://www.facebook.com/{match.group(1)}"
+            
+        # 2. Thử trích xuất ID số 10-16 chữ số bất kỳ
+        match_id = re.search(r'(\d{10,16})', url_str)
+        if match_id:
+            return f"https://www.facebook.com/{match_id.group(1)}"
+            
         try:
             r = requests.head(url_str, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, allow_redirects=True, timeout=5)
             final_url = r.url
-            match_final = re.search(r'(\d{10,20})', final_url)
+            match_final = re.search(r'(\d{10,16})', final_url)
             if match_final:
                 return f"https://www.facebook.com/{match_final.group(1)}"
             return final_url
