@@ -82,19 +82,23 @@ def start_zalo_and_open_chat(d, group_name):
                 except Exception:
                     pass
 
-                print(f"⏳ Đang chờ danh sách kết quả tìm kiếm cho '{group_name}'...")
+                print(f"⏳ Đang chờ và nhấp kết quả tìm kiếm cho '{group_name}'...")
+                time.sleep(2.0)
                 
-                # Tìm dòng kết quả (Chờ tối đa 6 giây để Zalo tải từ server)
-                target_item = d(textContains=group_name, className="android.widget.TextView")
-                if not target_item.exists:
-                    target_item = d(textContains=group_name)
-
-                if target_item.wait(timeout=6.0):
-                    target_item.click()
-                    time.sleep(3.0)
-                    if is_in_chat_room(d):
-                        print(f"✅ Đã mở phòng chat thành công: '{group_name}'")
-                        return True
+                # Dùng XPath để lấy tọa độ dòng kết quả và nhấp trực tiếp
+                xpath_item = d.xpath(f"//*[contains(@text, '{group_name}')]")
+                if xpath_item.wait(timeout=6.0):
+                    matches = xpath_item.all()
+                    for m in matches:
+                        # Bỏ qua ô nhập từ khóa tìm kiếm (EditText)
+                        if m.info.get("className") != "android.widget.EditText":
+                            m.click()
+                            print(f"👉 Đã nhấp vào dòng kết quả nhóm: '{group_name}'")
+                            time.sleep(3.0)
+                            if is_in_chat_room(d) or not d(resourceId="com.zing.zalo:id/search_src_text").exists:
+                                print(f"✅ Đã mở phòng chat thành công: '{group_name}'")
+                                return True
+                            break
         except Exception as e:
             print(f"⚠️ Lỗi trong quá trình tìm kiếm: {e}")
 
