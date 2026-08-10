@@ -321,30 +321,44 @@ def is_timestamp_or_status(s):
     s_clean = s.strip()
     if re.match(r'^\d{1,2}:\d{2}$', s_clean):
         return True
-    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi"]:
+    if s_clean in [TARGET_GROUP_NAME, "Nà ná na na", "Search games", "Không có mục gần đây nào", "Đã nhận", "Đã xem", "Đã gửi", "Của tôi", "Khám phá", "Liên hệ", "Zalo", "Tin nhắn", "Gửi"]:
+        return True
+    if "không phản hồi" in s_clean or "không phản hồi" in s_clean.lower():
         return True
     return False
 
 def get_latest_chat_message(d):
-    """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat qua XPath và UiSelector."""
+    """Đọc nội dung tin nhắn văn bản CHÍNH XÁC từ danh sách tin nhắn Zalo."""
     try:
-        # Lấy tất cả TextView có trên màn hình
-        all_text_views = d.xpath("//android.widget.TextView").all()
-        if all_text_views:
-            valid_texts = []
-            for item in all_text_views:
-                t = item.text.strip() if item.text else ""
-                if t and not is_timestamp_or_status(t) and not t.endswith("thành viên"):
-                    valid_texts.append(t)
+        # 1. Thử quét trực tiếp từ các resourceId tin nhắn chuẩn Zalo Android
+        res_ids = [
+            "com.zing.zalo:id/tv_message",
+            "com.zing.zalo:id/chat_message_text",
+            "com.zing.zalo:id/message_text",
+            "com.zing.zalo:id/tv_chat_content"
+        ]
+        for r_id in res_ids:
+            xpath_elems = d.xpath(f"//*[@resource-id='{r_id}']").all()
+            if xpath_elems:
+                texts = [e.text.strip() for e in xpath_elems if e.text and not is_timestamp_or_status(e.text)]
+                if texts:
+                    # Ưu tiên tin nhắn có lệnh (/) hoặc link trước
+                    for t in reversed(texts):
+                        if t.startswith("/") or "http" in t or "www." in t or any(d_name in t for d_name in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
+                            return t
+                    return texts[-1]
 
-            if valid_texts:
-                # 1. Ưu tiên duyệt ngược từ dưới lên để tìm tin nhắn bắt đầu bằng lệnh (/) hoặc chứa link (http/https/www)
-                for t in reversed(valid_texts):
-                    if t.startswith("/") or "http" in t or "www." in t or any(d_name in t for d_name in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
-                        return t
-
-                # 2. Nếu không có lệnh hay link, lấy câu văn bản hợp lệ cuối cùng
-                return valid_texts[-1]
+        # 2. Fallback: Chỉ quét TextView nằm NỘI TRONG khung danh sách tin nhắn Zalo (Loại bỏ hoàn toàn launcher/Android System UI)
+        list_containers = ["com.zing.zalo:id/chat_message_list", "com.zing.zalo:id/recycler_view", "com.zing.zalo:id/message_list"]
+        for c_id in list_containers:
+            container_texts = d.xpath(f"//*[@resource-id='{c_id}']//android.widget.TextView").all()
+            if container_texts:
+                valid = [e.text.strip() for e in container_texts if e.text and not is_timestamp_or_status(e.text) and not e.text.endswith("thành viên")]
+                if valid:
+                    for t in reversed(valid):
+                        if t.startswith("/") or "http" in t or "www." in t or any(d_name in t for d_name in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
+                            return t
+                    return valid[-1]
     except Exception as e:
         print(f"⚠️ Lỗi đọc tin nhắn: {e}")
     return None
@@ -362,6 +376,13 @@ def main():
         last_text = ""
         try:
             while True:
+                # Nếu bị văng ra khỏi phòng chat (do văng app hoặc bấm nhầm nút), tự động mở lại phòng chat
+                if not is_in_chat_room(d):
+                    print("🔄 Phát hiện bị thoát phòng chat! Đang tự động mở lại phòng chat...")
+                    start_zalo_and_open_chat(d, TARGET_GROUP_NAME)
+                    time.sleep(2)
+                    continue
+
                 msg_text = get_latest_chat_message(d)
                 if msg_text and msg_text != last_text:
                     last_text = msg_text
