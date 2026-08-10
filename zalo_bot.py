@@ -2943,6 +2943,13 @@ def download_video_web(target_url, output_dir):
             info = ydl.extract_info(target_url, download=True)
             filename = ydl.prepare_filename(info)
             if os.path.exists(filename) and os.path.getsize(filename) > 50000:
+                if not filename.lower().endswith(".mp4"):
+                    new_mp4 = os.path.splitext(filename)[0] + ".mp4"
+                    try:
+                        os.rename(filename, new_mp4)
+                        filename = new_mp4
+                    except Exception:
+                        pass
                 with open(filename, "rb") as check_f:
                     header = check_f.read(500)
                 if b"<!DOCTYPE" not in header and b"<html" not in header and b"<!doctype" not in header:
@@ -3084,25 +3091,40 @@ def gui_video_zalo(driver, video_path, caption=""):
     """Gửi video phát trực tiếp được trong nhóm chat Zalo qua Selenium."""
     try:
         abs_path = os.path.abspath(video_path)
+        # Ép file có đuôi .mp4 chuẩn để Zalo Web nhận diện là Media phát trực tiếp
+        if not abs_path.lower().endswith(".mp4"):
+            new_abs = os.path.splitext(abs_path)[0] + ".mp4"
+            try:
+                if os.path.exists(abs_path):
+                    os.rename(abs_path, new_abs)
+                    abs_path = new_abs
+            except Exception:
+                pass
+
         if not os.path.exists(abs_path) or os.path.getsize(abs_path) < 1000:
             print(f"❌ File video không hợp lệ: {abs_path}")
             return False
 
         # 🧠 BƯỚC 1: Đưa đường dẫn file video vào ô input Media (Ảnh/Video) của Zalo
-        # Ưu tiên input Media (accept image/video) thay vì input File đính kèm (để phát trực tiếp trong Zalo)
         uploaded = False
-        media_inputs = driver.find_elements(By.CSS_SELECTOR, "input[accept*='image'], input[accept*='video'], [data-translate-title*='PHOTO'] input, [data-translate-title*='MEDIA'] input")
-        target_inputs = media_inputs if media_inputs else driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+        all_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+        media_input = None
 
-        if target_inputs:
-            for fi in target_inputs:
-                try:
-                    fi.send_keys(abs_path)
-                    uploaded = True
-                    time.sleep(2.5)
-                    break
-                except Exception:
-                    pass
+        for fi in all_inputs:
+            acc = (fi.get_attribute("accept") or "").lower()
+            if "video" in acc or "image" in acc or "media" in acc or "photo" in acc:
+                media_input = fi
+                break
+
+        target_input = media_input if media_input else (all_inputs[0] if all_inputs else None)
+
+        if target_input:
+            try:
+                target_input.send_keys(abs_path)
+                uploaded = True
+                time.sleep(3.0)
+            except Exception as e:
+                print(f"⚠️ [Video] Lỗi send_keys target_input: {e}")
 
         # Fallback dán clipboard nếu không tìm thấy file input
         if not uploaded:
@@ -3134,7 +3156,7 @@ def gui_video_zalo(driver, video_path, caption=""):
             el.dispatchEvent(evt);
             """
             driver.execute_script(js_paste_video, b64_str)
-            time.sleep(2.0)
+            time.sleep(2.5)
 
         # 🧠 BƯỚC 2: Nhập caption nếu có
         if caption:
@@ -3151,15 +3173,31 @@ def gui_video_zalo(driver, video_path, caption=""):
             except Exception:
                 pass
 
-        # 🧠 BƯỚC 3: Bấm nút gửi
-        try:
-            send_btns = driver.find_elements(By.CSS_SELECTOR, ".send-msg-btn, button.btn-primary, [data-translate-inner='STR_SEND']")
-            if send_btns:
-                send_btns[0].click()
-            else:
-                input_box = driver.find_element(By.ID, "richInput")
-                input_box.send_keys(Keys.ENTER)
-        except Exception:
+        # 🧠 BƯỚC 3: Bấm nút Gửi (Ưu tiên nút Gửi trong Hộp thoại Popup Preview Media Zalo)
+        sent = False
+        send_selectors = [
+            ".preview-popup .btn-primary",
+            ".media-preview__send-btn",
+            "div.preview-popup button",
+            "button.btn-primary",
+            "[data-translate-inner='STR_SEND']",
+            ".send-msg-btn"
+        ]
+
+        for sel in send_selectors:
+            btns = driver.find_elements(By.CSS_SELECTOR, sel)
+            for b in btns:
+                try:
+                    if b.is_displayed():
+                        b.click()
+                        sent = True
+                        break
+                except Exception:
+                    pass
+            if sent:
+                break
+
+        if not sent:
             try:
                 input_box = driver.find_element(By.ID, "richInput")
                 input_box.send_keys(Keys.ENTER)
