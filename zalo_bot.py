@@ -3980,6 +3980,7 @@ def main():
     gui_tin_nhan_zalo(driver, random.choice(STARTUP_MESSAGES))
 
     last_processed_msg_id = None
+    processed_msg_ids = set()
     last_other_sender = "Bạn" 
     
     user_msg_counts = load_json_data(DATA_FILE, {}) 
@@ -4524,7 +4525,14 @@ def main():
                 continue
 
             for msg_obj in new_messages:
-                last_processed_msg_id = msg_obj.get_attribute("id")
+                msg_id = msg_obj.get_attribute("id")
+                if not msg_id or msg_id in processed_msg_ids:
+                    continue
+                processed_msg_ids.add(msg_id)
+                if len(processed_msg_ids) > 500:
+                    processed_msg_ids = set(list(processed_msg_ids)[-200:])
+                last_processed_msg_id = msg_id
+
                 if len(msg_obj.find_elements(By.CSS_SELECTOR, "[data-id*='Sticker'], [data-component='sticker']")) > 0: continue 
 
                     # 🧠 FIX LỖI NHẬN NHẦM NGƯỜI: Chuyển khối quét Tên ra ngoài cùng!
