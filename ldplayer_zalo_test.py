@@ -67,35 +67,61 @@ def normalize_video_url(url):
             pass
     return url_str
 
+FB_COOKIE_FILE = os.path.join(BASE_DIR, "fb_cookies.txt")  # Export từ extension EditThisCookie/Get cookies.txt
+
 def download_video_web(target_url, output_dir):
-    """Tải video đa nền tảng bằng yt-dlp trực tiếp mà không bắt buộc ffmpeg."""
+    """Tải video đa nền tảng bằng yt-dlp.
+    - Với FB nhóm riêng tư: thử cookie Chrome trước, fallback sang fb_cookies.txt, rồi tải không có cookie.
+    """
     target_url = normalize_video_url(target_url)
+    is_facebook = any(d in target_url.lower() for d in ["facebook.com", "fb.watch", "fb.gg"])
     try:
         import yt_dlp
         unique_id = str(uuid.uuid4())[:8]
         out_template = os.path.join(output_dir, f"temp_video_{unique_id}.%(ext)s")
-        ydl_opts = {
-            # Ưu tiên mp4 dưới 25MB để Zalo nhận được, fallback best nếu không có
+        base_opts = {
+            # Ưu tiên mp4 dưới 25MB để Zalo nhận được
             'format': 'best[ext=mp4][filesize<25M]/best[ext=mp4][filesize<50M]/best[ext=mp4]/best',
             'outtmpl': out_template,
             'quiet': True,
             'no_warnings': True,
-            'max_filesize': 50 * 1024 * 1024, # 50MB
+            'max_filesize': 50 * 1024 * 1024,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(target_url, download=True)
-            filename = ydl.prepare_filename(info)
-            if os.path.exists(filename) and os.path.getsize(filename) > 50000:
-                if not filename.lower().endswith(".mp4"):
-                    new_mp4 = os.path.splitext(filename)[0] + ".mp4"
-                    try:
-                        os.rename(filename, new_mp4)
-                        filename = new_mp4
-                    except Exception:
-                        pass
-                print(f"✅ [yt-dlp] Tải video thành công: {filename}")
-                return filename
+
+        # Danh sách các chiến lược thử theo thứ tự ưu tiên
+        strategies = []
+        if is_facebook:
+            # 1. Ưu tiên: Cookie Chrome (yt-dlp tự đọc, hỗ trợ App-Bound Encryption Chrome 127+)
+            strategies.append(("Chrome cookies", {**base_opts, 'cookiesfrombrowser': ('chrome',)}))
+            # 2. Fallback: File cookie xuất từ extension (EditThisCookie, Get cookies.txt...)
+            if os.path.exists(FB_COOKIE_FILE):
+                strategies.append(("fb_cookies.txt", {**base_opts, 'cookiefile': FB_COOKIE_FILE}))
+        # 3. Không có cookie (công khai / TikTok / YouTube)
+        strategies.append(("anonymous", base_opts))
+
+        for strategy_name, opts in strategies:
+            try:
+                print(f"🔑 [yt-dlp] Thử tải bằng chiến lược: {strategy_name}...")
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(target_url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    if os.path.exists(filename) and os.path.getsize(filename) > 50000:
+                        if not filename.lower().endswith(".mp4"):
+                            new_mp4 = os.path.splitext(filename)[0] + ".mp4"
+                            try:
+                                os.rename(filename, new_mp4)
+                                filename = new_mp4
+                            except Exception:
+                                pass
+                        print(f"✅ [yt-dlp/{strategy_name}] Tải video thành công: {os.path.basename(filename)}")
+                        return filename
+            except Exception as e:
+                err_msg = str(e)
+                if "login" in err_msg.lower() or "private" in err_msg.lower() or "403" in err_msg or "not available" in err_msg.lower():
+                    print(f"⚠️ [yt-dlp/{strategy_name}] Cần đăng nhập: {err_msg[:80]}")
+                else:
+                    print(f"⚠️ [yt-dlp/{strategy_name}] Lỗi: {err_msg[:80]}")
     except Exception as e:
         print(f"⚠️ [yt-dlp] Lỗi tải video: {e}")
     return None
