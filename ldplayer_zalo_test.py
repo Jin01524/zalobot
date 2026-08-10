@@ -77,11 +77,11 @@ def download_video_web(target_url, output_dir):
     return None
 
 def is_in_chat_room(d):
-    """Kiểm tra xem hiện tại có phải đang ở trong màn hình phòng chat hay không."""
+    """Kiểm tra xem hiện tại có phải đang ở trong màn hình phòng chat hay không (Dựa trên XML Dump chuẩn)."""
     return (
-        d(resourceId="com.zing.zalo:id/chat_input_text").exists or 
-        d(resourceId="com.zing.zalo:id/input_chat").exists or 
-        d(resourceId="com.zing.zalo:id/chat_btn_send").exists
+        d(resourceId="com.zing.zalo:id/chatinput_text").exists or 
+        d(resourceId="com.zing.zalo:id/chatlinelist").exists or 
+        d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery").exists
     )
 
 def start_zalo_and_open_chat(d, group_name):
@@ -160,14 +160,6 @@ def start_zalo_and_open_chat(d, group_name):
         except Exception as e:
             print(f"⚠️ Lỗi trong quá trình tìm kiếm: {e}")
 
-    # Debug: In ra tất cả text hiện tại trên màn hình Zalo để soi Selector
-    print("ℹ️ Danh sách chữ hiện trên màn hình LDPlayer hiện tại:")
-    try:
-        visible_texts = [el.get_text() for el in d(className="android.widget.TextView") if el.get_text()]
-        print("   " + ", ".join(visible_texts[:15]))
-    except Exception:
-        pass
-
     print(f"❌ Không mở được phòng chat: '{group_name}'")
     return False
 
@@ -176,11 +168,9 @@ def send_zalo_message(d, text_msg):
     try:
         input_box = None
         selectors = [
+            d(resourceId="com.zing.zalo:id/chatinput_text"),
             d(resourceId="com.zing.zalo:id/chat_input_text"),
             d(resourceId="com.zing.zalo:id/input_chat"),
-            d(resourceId="com.zing.zalo:id/input_chat_text"),
-            d(text="Tin nhắn"),
-            d(textContains="Tin nhắn"),
             d(className="android.widget.EditText")
         ]
         for sel in selectors:
@@ -248,28 +238,19 @@ def send_zalo_video_android(d, video_path):
         d.shell(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_android_path}")
         time.sleep(1.5)
 
-        # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo
+        # Click icon Thư viện Ảnh/Video trên thanh công cụ chat Zalo (Dựa trên XML Dump chuẩn)
         print("🖼️ Đang mở Thư viện media Zalo...")
-        photo_btn = None
-        photo_selectors = [
-            d(resourceId="com.zing.zalo:id/btn_photo"),
-            d(resourceId="com.zing.zalo:id/stk_btn_photo"),
-            d(resourceId="com.zing.zalo:id/chat_btn_photo"),
-            d(description="Ảnh"),
-            d(description="Thư viện"),
-            d.xpath("//*[contains(@resource-id, 'photo') or contains(@resource-id, 'media') or contains(@resource-id, 'gallery')]")
-        ]
-        for p_sel in photo_selectors:
-            if p_sel.exists:
-                photo_btn = p_sel
-                break
-
-        if photo_btn:
+        photo_btn = (
+            d(resourceId="com.zing.zalo:id/new_chat_input_btn_show_gallery") or 
+            d(description="Mở nơi gửi hình ảnh") or
+            d(resourceId="com.zing.zalo:id/btn_photo")
+        )
+        if photo_btn.exists:
             photo_btn.click()
             time.sleep(2)
         else:
-            # Click icon Thư viện ảnh ở thanh dưới bên phải ô nhập tin nhắn
-            d.click(660, 1220)
+            # Fallback nhấp tọa độ icon Thư viện ảnh ở thanh dưới bên phải ô nhập tin nhắn
+            d.click(850, 1550)
             time.sleep(2)
 
         # Bật chế độ HD nếu có
@@ -328,39 +309,34 @@ def is_timestamp_or_status(s):
     return False
 
 def get_latest_chat_message(d):
-    """Đọc nội dung tin nhắn văn bản CHÍNH XÁC từ danh sách tin nhắn Zalo."""
+    """Đọc nội dung tin nhắn văn bản CHÍNH XÁC từ danh sách chatlinelist (Dựa trên XML Dump chuẩn)."""
     try:
-        # 1. Thử quét trực tiếp từ các resourceId tin nhắn chuẩn Zalo Android
-        res_ids = [
-            "com.zing.zalo:id/tv_message",
-            "com.zing.zalo:id/chat_message_text",
-            "com.zing.zalo:id/message_text",
-            "com.zing.zalo:id/tv_chat_content"
-        ]
-        for r_id in res_ids:
-            xpath_elems = d.xpath(f"//*[@resource-id='{r_id}']").all()
-            if xpath_elems:
-                texts = [e.text.strip() for e in xpath_elems if e.text and not is_timestamp_or_status(e.text)]
-                if texts:
-                    # Ưu tiên tin nhắn có lệnh (/) hoặc link trước
-                    for t in reversed(texts):
-                        if t.startswith("/") or "http" in t or "www." in t or any(d_name in t for d_name in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
-                            return t
-                    return texts[-1]
+        # Lấy tất cả item tin nhắn trong chatlinelist (chuẩn 100% từ XML Dump)
+        items = d.xpath("//*[@resource-id='com.zing.zalo:id/chatlinelist']/*").all()
+        if items:
+            for item in reversed(items):
+                full_text = item.text or ""
+                if not full_text:
+                    child_texts = [c.text.strip() for c in item.xpath(".//android.widget.TextView").all() if c.text]
+                    full_text = "\n".join(child_texts)
 
-        # 2. Fallback: Chỉ quét TextView nằm NỘI TRONG khung danh sách tin nhắn Zalo (Loại bỏ hoàn toàn launcher/Android System UI)
-        list_containers = ["com.zing.zalo:id/chat_message_list", "com.zing.zalo:id/recycler_view", "com.zing.zalo:id/message_list"]
-        for c_id in list_containers:
-            container_texts = d.xpath(f"//*[@resource-id='{c_id}']//android.widget.TextView").all()
-            if container_texts:
-                valid = [e.text.strip() for e in container_texts if e.text and not is_timestamp_or_status(e.text) and not e.text.endswith("thành viên")]
-                if valid:
-                    for t in reversed(valid):
-                        if t.startswith("/") or "http" in t or "www." in t or any(d_name in t for d_name in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
-                            return t
-                    return valid[-1]
+                if full_text:
+                    # Bỏ qua nếu là tin nhắn do Bot gửi
+                    if "Tẻn Android Bot" in full_text or "kết nối trực tiếp thành công" in full_text:
+                        continue
+                    
+                    # Ưu tiên lấy dòng chứa lệnh (/video, /v, /ping, /menu) hoặc chứa link (http, www)
+                    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+                    for line in lines:
+                        if line.startswith("/") or "http" in line or "www." in line or any(domain in line for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
+                            return line
+                    if lines:
+                        # Bỏ qua mốc thời gian (vd: 22:41)
+                        valid_lines = [l for l in lines if not is_timestamp_or_status(l)]
+                        if valid_lines:
+                            return valid_lines[0]
     except Exception as e:
-        print(f"⚠️ Lỗi đọc tin nhắn: {e}")
+        print(f"⚠️ Lỗi đọc chatlinelist: {e}")
     return None
 
 def main():
