@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 import requests
+import msvcrt
 import uiautomator2 as u2
 
 # Cấu hình địa chỉ ADB LDPlayer (Mặc định LDPlayer 9 là 127.0.0.1:5555 hoặc 127.0.0.1:62001)
@@ -390,6 +391,17 @@ def get_latest_chat_message(d):
         print(f"⚠️ Lỗi đọc chatlinelist: {e}")
     return None
 
+def exit_to_android_home(d):
+    """Thoát Zalo và quay về màn hình chính Android LDPlayer trước khi dừng chương trình."""
+    print("\n🏠 Đang thoát Zalo và quay về màn hình chính Android (LDPlayer)...")
+    try:
+        if d:
+            d.press("home")
+            time.sleep(1)
+    except Exception as e:
+        print(f"⚠️ Lỗi bấm nút Home: {e}")
+    print("🛑 Bot đã dừng an toàn và quay về màn hình chính!")
+
 def main():
     d = init_ldplayer()
     if not d:
@@ -399,10 +411,26 @@ def main():
     if start_zalo_and_open_chat(d, TARGET_GROUP_NAME):
         send_zalo_message(d, "🤖 Tẻn Android Bot (LDPlayer) đã kết nối trực tiếp thành công!")
         
-        print("👁️ Bắt đầu vòng lặp lắng nghe tin nhắn Zalo Android...")
+        print("👁️ Bắt đầu vòng lặp lắng nghe tin nhắn Zalo Android... (Gõ 'stop' + Enter hoặc Ctrl+C để quay về màn hình chính Android)")
         last_text = ""
+        cmd_buffer = ""
         try:
             while True:
+                # Kiểm tra phím gõ từ CMD (Nhận lệnh 'stop' + Enter)
+                if msvcrt.kbhit():
+                    ch = msvcrt.getwch()
+                    if ch in ['\r', '\n']:
+                        typed_cmd = cmd_buffer.strip().lower()
+                        cmd_buffer = ""
+                        if typed_cmd == "stop":
+                            print("\n🛑 Nhận lệnh 'stop' từ màn hình CMD!")
+                            exit_to_android_home(d)
+                            return
+                    elif ch in ['\b', '\x08']:
+                        cmd_buffer = cmd_buffer[:-1]
+                    else:
+                        cmd_buffer += ch
+
                 # Nếu bị văng ra khỏi phòng chat (do văng app hoặc bấm nhầm nút), tự động mở lại phòng chat
                 if not is_in_chat_room(d):
                     print("🔄 Phát hiện bị thoát phòng chat! Đang tự động mở lại phòng chat...")
@@ -436,7 +464,7 @@ def main():
 
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\n🛑 Đã dừng test bot LDPlayer.")
+            exit_to_android_home(d)
 
 if __name__ == "__main__":
     main()
