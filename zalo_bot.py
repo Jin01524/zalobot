@@ -2891,12 +2891,39 @@ def gui_anh_zalo(driver, image_data, caption=""):
         return False
 
 
+def normalize_video_url(url):
+    """
+    Chuẩn hóa URL Facebook/TikTok/YouTube trước khi đưa vào downloader.
+    Tự động trích xuất ID số (10-20 chữ số) từ link share/watch/reel/fb.watch để tránh lỗi 'Cannot parse data' của yt-dlp.
+    Ví dụ:
+    - https://www.facebook.com/share/r/1498614348705271/?mibextid=xxx -> https://www.facebook.com/1498614348705271
+    - https://fb.watch/1498614348705271/ -> https://www.facebook.com/1498614348705271
+    """
+    url_str = str(url).strip().strip("<>").strip()
+    if any(domain in url_str.lower() for domain in ["facebook.com", "fb.watch", "fb.gg"]):
+        match = re.search(r'(\d{10,20})', url_str)
+        if match:
+            return f"https://www.facebook.com/{match.group(1)}"
+        try:
+            r = requests.head(url_str, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, allow_redirects=True, timeout=5)
+            final_url = r.url
+            match_final = re.search(r'(\d{10,20})', final_url)
+            if match_final:
+                return f"https://www.facebook.com/{match_final.group(1)}"
+            return final_url
+        except Exception:
+            pass
+    return url_str
+
+
 def download_video_web(target_url, output_dir):
     """
     Tải video đa nền tảng (Facebook, YouTube, TikTok, Instagram, Twitter/X...):
     1. Ưu tiên sử dụng thư viện yt-dlp trực tiếp (tốc độ cao, không phụ thuộc trình duyệt web cào).
     2. Nếu yt-dlp gặp lỗi, fallback sang Selenium cào link từ trang web hỗ trợ (fsave, xsaver, savevid, ytsave).
     """
+    target_url = normalize_video_url(target_url)
+
     # ─── CÁCH 1: DÙNG YT-DLP TRỰC TIẾP ───────────────────────────────────────
     try:
         import yt_dlp
