@@ -76,19 +76,22 @@ def start_zalo_and_open_chat(d, group_name):
             )
             if search_input.exists:
                 search_input.set_text(group_name)
-                time.sleep(2.5)
-                
-                # Click trực tiếp dòng kết quả TextView (Bỏ qua ô EditText tìm kiếm)
-                target_item = (
-                    d(text=group_name, className="android.widget.TextView") or 
-                    d(textContains=group_name, className="android.widget.TextView") or
-                    d(text=group_name) or
-                    d(textContains=group_name)
-                )
+                time.sleep(1.0)
+                try:
+                    d.press("enter")
+                except Exception:
+                    pass
 
-                if target_item.exists:
+                print(f"⏳ Đang chờ danh sách kết quả tìm kiếm cho '{group_name}'...")
+                
+                # Tìm dòng kết quả (Chờ tối đa 6 giây để Zalo tải từ server)
+                target_item = d(textContains=group_name, className="android.widget.TextView")
+                if not target_item.exists:
+                    target_item = d(textContains=group_name)
+
+                if target_item.wait(timeout=6.0):
                     target_item.click()
-                    time.sleep(2.5)
+                    time.sleep(3.0)
                     if is_in_chat_room(d):
                         print(f"✅ Đã mở phòng chat thành công: '{group_name}'")
                         return True
