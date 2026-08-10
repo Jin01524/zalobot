@@ -328,21 +328,7 @@ def is_timestamp_or_status(s):
 def get_latest_chat_message(d):
     """Đọc nội dung tin nhắn văn bản mới nhất trong màn hình chat qua XPath và UiSelector."""
     try:
-        # Cách 1: Thử tìm theo resourceId tin nhắn Zalo Android chuẩn (tv_message, chat_message_text)
-        res_ids = [
-            "com.zing.zalo:id/tv_message",
-            "com.zing.zalo:id/chat_message_text",
-            "com.zing.zalo:id/message_text",
-            "com.zing.zalo:id/tv_chat_content"
-        ]
-        for r_id in res_ids:
-            xpath_elems = d.xpath(f"//*[@resource-id='{r_id}']").all()
-            if xpath_elems:
-                texts = [e.text.strip() for e in xpath_elems if e.text and not is_timestamp_or_status(e.text)]
-                if texts:
-                    return texts[-1]
-
-        # Cách 2: Fallback lấy tất cả TextView có sẵn trong cuộc hội thoại (Loại bỏ mốc thời gian 22:33)
+        # Lấy tất cả TextView có trên màn hình
         all_text_views = d.xpath("//android.widget.TextView").all()
         if all_text_views:
             valid_texts = []
@@ -350,7 +336,14 @@ def get_latest_chat_message(d):
                 t = item.text.strip() if item.text else ""
                 if t and not is_timestamp_or_status(t) and not t.endswith("thành viên"):
                     valid_texts.append(t)
+
             if valid_texts:
+                # 1. Ưu tiên duyệt ngược từ dưới lên để tìm tin nhắn bắt đầu bằng lệnh (/) hoặc chứa link (http/https/www)
+                for t in reversed(valid_texts):
+                    if t.startswith("/") or "http" in t or "www." in t or any(d_name in t for d_name in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
+                        return t
+
+                # 2. Nếu không có lệnh hay link, lấy câu văn bản hợp lệ cuối cùng
                 return valid_texts[-1]
     except Exception as e:
         print(f"⚠️ Lỗi đọc tin nhắn: {e}")
@@ -372,16 +365,19 @@ def main():
                 msg_text = get_latest_chat_message(d)
                 if msg_text and msg_text != last_text:
                     last_text = msg_text
-                    print(f"📩 Tin nhắn mới nhận: {msg_text}")
+                    print(f"📩 [Scan Result] Đã phát hiện tin nhắn mới: '{msg_text}'")
                     
                     if msg_text.startswith("/ping"):
                         send_zalo_message(d, "🏓 Pong! Bot LDPlayer đang phản hồi cực nhanh!")
                     elif msg_text.startswith("/menu"):
                         send_zalo_message(d, "📜 [TẺN ANDROID BOT]\n- /ping\n- /menu\n- /video [link_fb_tt_yt]\n- Tải video HD phát mượt 100%!")
                     elif msg_text.startswith("/video") or msg_text.startswith("/v ") or any(domain in msg_text for domain in ["facebook.com", "fb.watch", "tiktok.com", "youtube.com", "youtu.be"]):
-                        url_match = re.search(r'(https?://[^\s]+)', msg_text)
+                        url_match = re.search(r'((?:https?://|www\.)[^\s]+)', msg_text)
                         if url_match:
                             target_url = url_match.group(1)
+                            if target_url.startswith("www."):
+                                target_url = "https://" + target_url
+                            print(f"🎬 [Video Handler] Đang xử lý tải URL: {target_url}")
                             send_zalo_message(d, "⏳ Tẻn đang tải video MXH về nhóm, sếp chờ xíu nhé...")
                             v_file = download_video_web(target_url, BASE_DIR)
                             if v_file:
